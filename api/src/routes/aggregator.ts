@@ -10,6 +10,7 @@ import {
 } from "../lib/aggregatorUtils.js";
 
 const router = Router();
+const PROTOCOL = "vesu";
 
 router.get("/pools", async (req: Request, res: Response) => {
   try {
@@ -20,7 +21,12 @@ router.get("/pools", async (req: Request, res: Response) => {
     const pools = pickArray(raw, ["data", "pools"]).map(normalizePool);
     const filtered = pools.filter((pool) => pool.isDeprecated !== true);
 
-    return res.json({ data: filtered });
+    return res.json({
+      data: filtered.map((pool) => ({
+        protocol: PROTOCOL,
+        data: pool,
+      })),
+    });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "Failed to fetch pools";
     return res.status(502).json({ error: msg });
@@ -38,7 +44,12 @@ router.get("/positions", async (req: Request, res: Response) => {
     const positions = pickArray(raw, ["data", "positions"]).map((entry) =>
       normalizePosition(entry, walletAddress)
     );
-    return res.json({ data: positions });
+    return res.json({
+      data: positions.map((position) => ({
+        protocol: PROTOCOL,
+        data: position,
+      })),
+    });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "Failed to fetch positions";
     return res.status(502).json({ error: msg });
@@ -54,7 +65,12 @@ router.get("/users/:address/history", async (req: Request, res: Response) => {
   try {
     const raw = await getUserHistory(address);
     const history = pickArray(raw, ["data", "history"]).map(normalizeHistoryEntry);
-    return res.json({ data: history });
+    return res.json({
+      data: history.map((entry) => ({
+        protocol: PROTOCOL,
+        data: entry,
+      })),
+    });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "Failed to fetch user history";
     return res.status(502).json({ error: msg });
