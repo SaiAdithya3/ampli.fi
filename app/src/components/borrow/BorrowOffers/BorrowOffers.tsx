@@ -1,0 +1,375 @@
+import { useEffect, useState } from "react";
+import {
+  getLoanOffers,
+  type LoanOfferItem,
+  type BridgeOrderPayment,
+} from "@/lib/amplifi-api";
+import { getAssetIconUrl, LOGOS } from "@/lib/constants";
+import { LoanStatusPanel } from "../LoanStatusPanel";
+
+const COLLATERAL = "WBTC";
+const BORROW = "USDC";
+
+function formatPct(n: number): string {
+  return (n * 100).toFixed(2);
+}
+
+export interface LoanFlowState {
+  orderId: string;
+  depositAddress?: string;
+  amountSats?: string;
+  payment?: BridgeOrderPayment;
+}
+
+export interface BorrowOffersProps {
+  /** When set, offers are fetched with this and targetLtv so quote (e.g. liquidation price) is for the user's selection. */
+  borrowUsd?: number;
+  targetLtv?: number;
+  selectedOffer?: { item: LoanOfferItem; isBest: boolean } | null;
+  onSelectOffer?: (offer: { item: LoanOfferItem; isBest: boolean } | null) => void;
+  /** When set, loan is in progress - show status panel and keep offer detail visible. */
+  loanFlow?: LoanFlowState | null;
+  /** When true, BTC send popup is open / user is signing. */
+  isSendingBtc?: boolean;
+  /** Called when user clicks Sign for PSBT flow */
+  onSignPsbt?: (orderId: string, payment: Extract<BridgeOrderPayment, { type: "FUNDED_PSBT" } | { type: "RAW_PSBT" }>) => void;
+}
+
+export function BorrowOffers({
+  borrowUsd,
+  targetLtv,
+  selectedOffer,
+  onSelectOffer,
+  loanFlow,
+  isSendingBtc,
+  onSignPsbt,
+}: BorrowOffersProps) {
+  const [offers, setOffers] = useState<LoanOfferItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const params: Parameters<typeof getLoanOffers>[0] = {
+      collateral: COLLATERAL,
+      borrow: BORROW,
+      sortBy: "netApy",
+      sortOrder: "desc",
+      limit: 20,
+    };
+    if (borrowUsd != null && borrowUsd > 0) params.borrowUsd = borrowUsd;
+    if (targetLtv != null && targetLtv > 0) params.targetLtv = targetLtv;
+
+    getLoanOffers(params)
+      .then((res) => {
+        if (!cancelled) {
+          setOffers(res.data);
+          setError(null);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : String(e));
+          setOffers([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [borrowUsd, targetLtv]);
+
+  if (selectedOffer || loanFlow) {
+    const { item, isBest } = selectedOffer ?? { item: null!, isBest: false };
+    if (!item) {
+      return (
+        <section className="rounded-amplifi-lg bg-white p-5 md:h-fit md:min-h-0">
+          {loanFlow && (
+            <LoanStatusPanel
+              orderId={loanFlow.orderId}
+              depositAddress={loanFlow.depositAddress}
+              amountSats={loanFlow.amountSats}
+              payment={loanFlow.payment}
+              isSendingBtc={isSendingBtc}
+              onSignPsbt={onSignPsbt}
+            />
+          )}
+          <p className="text-sm text-amplifi-muted">No offer selected.</p>
+        </section>
+      );
+    }
+    const d = item.data;
+    const poolName = d.pool.name.toLowerCase();
+    const displayName = poolName.charAt(0).toUpperCase() + poolName.slice(1);
+    const liquidationPrice = d.quote?.liquidationPrice ?? 0;
+    const targetLtvPct = d.quote?.targetLtv != null ? formatPct(d.quote.targetLtv) : "—";
+    const btcPriceUsd =
+      d.quote?.requiredCollateralUsd != null && d.quote?.requiredCollateralAmount != null && d.quote.requiredCollateralAmount > 0
+        ? d.quote.requiredCollateralUsd / d.quote.requiredCollateralAmount
+        : null;
+    const dropPct =
+      btcPriceUsd != null && d.quote?.liquidationPrice != null && d.quote.liquidationPrice > 0
+        ? (((btcPriceUsd - d.quote.liquidationPrice) / btcPriceUsd) * 100).toFixed(0)
+        : null;
+
+    return (
+      <section className="rounded-amplifi-lg bg-white p-5 md:h-fit md:min-h-0">
+        {loanFlow && (
+          <LoanStatusPanel
+            orderId={loanFlow.orderId}
+            depositAddress={loanFlow.depositAddress}
+            amountSats={loanFlow.amountSats}
+            payment={loanFlow.payment}
+            isSendingBtc={isSendingBtc}
+            onSignPsbt={onSignPsbt}
+          />
+        )}
+        <p className="mb-6 flex items-center gap-2 text-base text-amplifi-text">
+          <img src={LOGOS.borrow} alt="borrow" className="h-5 w-5" />
+          {isBest ? `${displayName}'s Best Offer` : `${displayName}'s Offer`}
+        </p>
+        <div className="mb-6 flex items-center gap-2 justify-between">
+          <div className="flex items-center gap-2">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amplifi-primary text-sm font-semibold text-white">
+              {d.pool.name.charAt(0)}
+            </div>
+            <span className="text-sm font-medium capitalize text-amplifi-text">{poolName}</span>
+            {isBest && (
+              <span
+              className="rounded-[4px] text-amplifi-risk-safe bg-amplifi-risk-safe-bg/50 px-1.5 py-0.5 text-sm font-normal tracking-[-0.28px]"
+              >
+                Best Offer
+              </span>
+            )}
+          </div>
+          {!loanFlow && (
+            <img
+              src={LOGOS.back}
+              alt="back"
+              className="h-7 w-7 shrink-0 cursor-pointer text-amplifi-muted"
+              onClick={() => onSelectOffer?.(null)}
+              aria-label="Back to offers"
+            />
+          )}
+        </div>
+        <div className="mb-6 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
+          <div>
+            <p className="text-xs text-amplifi-muted">Net APY</p>
+            <p className="text-sm font-semibold text-amplifi-text">{formatPct(d.netApy)}%</p>
+          </div>
+          <div>
+            <p className="text-xs text-amplifi-muted">Max LTV</p>
+            <p className="text-sm font-semibold text-amplifi-text">{formatPct(d.maxLtv)}%</p>
+          </div>
+          <div>
+            <p className="text-xs text-amplifi-muted">Liquidation price</p>
+            <p className="text-sm font-semibold text-amplifi-text">
+              {liquidationPrice > 0 ? `$${liquidationPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-amplifi-muted">Collateral</p>
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-amplifi-text">
+              <img src={getAssetIconUrl(d.collateral.symbol)} alt="" className="h-4 w-4 rounded-full" />
+              {d.collateral.symbol}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-amplifi-muted">Loan</p>
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-amplifi-text">
+              <img src={getAssetIconUrl(d.borrow.symbol)} alt="" className="h-4 w-4 rounded-full" />
+              {d.borrow.symbol}
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-5 border-t border-amplifi-border pt-5">
+          <div>
+            <div className="mb-3 flex items-center gap-2 text-base text-amplifi-text">
+              <img src={LOGOS.borrow} alt="attributes" className="h-5 w-5 text-amplifi-muted" />
+              Market Attributes
+            </div>
+            <dl className="space-y-2 text-base">
+              <div className="flex justify-between gap-2">
+                <dt className="text-base text-amplifi-muted">Liquidation price</dt>
+                <dd className="text-xl font-semibold text-amplifi-text">
+                  {liquidationPrice > 0 ? `$${liquidationPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-base text-amplifi-muted">Loan term</dt>
+                <dd className="text-xl font-semibold text-amplifi-text">Unlimited</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-base text-amplifi-muted">Oracle price</dt>
+                <dd className="text-xl font-semibold text-amplifi-text">
+                  {d.collateral.symbol} / {d.borrow.symbol} = —
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-base text-amplifi-muted">Total Fee</dt>
+                <dd className="text-xl font-semibold text-amplifi-text">—</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div>
+            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-amplifi-text">
+              <img src={LOGOS.ltv} alt="ltv" className="h-4 w-4 text-amplifi-muted" />
+              Loan To Value
+            </div>
+            {dropPct != null && (
+              <p className="mb-3 text-sm text-amplifi-muted">
+                {d.collateral.symbol} price can fall ~{dropPct}% before your collateral is liquidated.
+              </p>
+            )}
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <p className="text-xs text-amplifi-muted">Loan-To-Value</p>
+                <p className="font-semibold text-amplifi-text">{targetLtvPct}%</p>
+              </div>
+              <div>
+                <p className="text-xs text-amplifi-muted">Liquidation price</p>
+                <p className="font-semibold text-amplifi-text">
+                  {liquidationPrice > 0 ? `$${liquidationPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-amplifi-text">
+              <img src={LOGOS.protocol} alt="protocol" className="h-4 w-4 text-amplifi-muted" />
+              Protocol
+            </div>
+            <p className="text-sm text-amplifi-muted">
+              Your loan is powered by {displayName}, an open source lending protocol. By continuing, you agree to{" "}
+              <a
+                href="#"
+                className="font-medium text-amplifi-primary underline hover:text-amplifi-primary-hover"
+                onClick={(e) => e.preventDefault()}
+              >
+                {d.pool.name.toUpperCase()}'s Terms of Use
+              </a>
+              .
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-amplifi-lg bg-white p-5 md:h-fit md:min-h-0">
+      <p className="mb-0.5 flex items-center gap-2 text-base text-amplifi-text">
+        <img src={LOGOS.borrow} alt="borrow" className="h-5 w-5" />
+        Borrow offers
+      </p>
+      {error && (
+        <p className="mb-4 text-sm text-red-600">{error}</p>
+      )}
+      {loading ? (
+        <p className="text-sm text-amplifi-text-muted">Loading offers…</p>
+      ) : (
+        <ul className="space-y-0">
+          {offers.map((item, index) => {
+            const d = item.data;
+            const liquidationPrice = d.quote?.liquidationPrice ?? 0;
+            const isBest = index === 0;
+            return (
+              <li
+                key={d.offerId}
+                role="button"
+                tabIndex={0}
+                className="flex flex-col gap-4 border-b border-amplifi-border py-6 last:border-b-0"
+              >
+                {/* Top row: logo, pool name + Best Offer tag, arrow */}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amplifi-primary text-sm font-semibold text-white"
+                      aria-hidden
+                    >
+                      {d.pool.name.charAt(0)}
+                    </div>
+                    <span className="text-sm font-medium capitalize text-amplifi-text">
+                      {d.pool.name.toLowerCase()}
+                    </span>
+                    {isBest && (
+                      <span
+                      className="rounded-[4px] text-amplifi-risk-safe bg-amplifi-risk-safe-bg/50 px-1.5 py-0.5 text-sm font-normal tracking-[-0.28px]"
+                      >
+                        Best Offer
+                      </span>
+                    )}
+                  </div>
+                  <img
+                    src={LOGOS.next}
+                    alt="next"
+                    className="h-7 w-7 shrink-0 text-amplifi-muted cursor-pointer"
+
+                    onClick={() => onSelectOffer?.({ item, isBest })}
+                    onKeyDown={(e) => e.key === "Enter" && onSelectOffer?.({ item, isBest })}                  />
+                </div>
+
+                {/* Five columns: label above value */}
+                <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
+                  <div>
+                    <p className="text-xs text-amplifi-muted">Net APY</p>
+                    <p className="text-sm font-semibold text-amplifi-text">
+                      {formatPct(d.netApy)}%
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-amplifi-muted">Max LTV</p>
+                    <p className="text-sm font-semibold text-amplifi-text">
+                      {formatPct(d.maxLtv)}%
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-amplifi-muted">Liquidation Price</p>
+                    <p className="text-sm font-semibold text-amplifi-text">
+                      {liquidationPrice > 0
+                        ? `$${liquidationPrice.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}`
+                        : "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-amplifi-muted">Collateral</p>
+                    <p className="flex items-center gap-1.5 text-sm font-semibold text-amplifi-text">
+                      <img
+                        src={getAssetIconUrl(d.collateral.symbol)}
+                        alt=""
+                        className="h-4 w-4 rounded-full"
+                      />
+                      {d.collateral.symbol}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-amplifi-muted">Loan</p>
+                    <p className="flex items-center gap-1.5 text-sm font-semibold text-amplifi-text">
+                      <img
+                        src={getAssetIconUrl(d.borrow.symbol)}
+                        alt=""
+                        className="h-4 w-4 rounded-full"
+                      />
+                      {d.borrow.symbol}
+                    </p>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {!loading && !error && offers.length === 0 && (
+        <p className="text-sm text-amplifi-text-muted">No offers found.</p>
+      )}
+    </section>
+  );
+}

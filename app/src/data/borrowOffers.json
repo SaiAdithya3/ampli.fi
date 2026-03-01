@@ -1,0 +1,41 @@
+[
+  {
+    "id": "offer-1",
+    "providerName": "Aave",
+    "providerLogoUrl": "https://placehold.co/40x40/8b5cf6/ffffff?text=AAVE",
+    "netApy": "3.07",
+    "maxLtv": "73",
+    "liquidationPrice": "59077.95",
+    "collateralSymbol": "BTC",
+    "collateralLogoUrl": "https://placehold.co/24x24/f97316/ffffff?text=B",
+    "loanSymbol": "wBTC",
+    "loanLogoUrl": "https://placehold.co/24x24/8b5cf6/ffffff?text=W",
+    "bestOffer": true
+  },
+  {
+    "id": "offer-2",
+    "providerName": "Morpho",
+    "providerLogoUrl": "https://placehold.co/40x40/3b82f6/ffffff?text=M",
+    "netApy": "3.07",
+    "maxLtv": "73",
+    "liquidationPrice": "59077.95",
+    "collateralSymbol": "BTC",
+    "collateralLogoUrl": "https://placehold.co/24x24/f97316/ffffff?text=B",
+    "loanSymbol": "wBTC",
+    "loanLogoUrl": "https://placehold.co/24x24/8b5cf6/ffffff?text=W",
+    "bestOffer": false
+  },
+  {
+    "id": "offer-3",
+    "providerName": "Aave",
+    "providerLogoUrl": "https://placehold.co/40x40/8b5cf6/ffffff?text=AAVE",
+    "netApy": "3.07",
+    "maxLtv": "73",
+    "liquidationPrice": "59077.95",
+    "collateralSymbol": "BTC",
+    "collateralLogoUrl": "https://placehold.co/24x24/f97316/ffffff?text=B",
+    "loanSymbol": "wBTC",
+    "loanLogoUrl": "https://placehold.co/24x24/8b5cf6/ffffff?text=W",
+    "bestOffer": false
+  }
+]
