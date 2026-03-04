@@ -50,6 +50,7 @@ export const ASSET_ICONS = {
   WBTC: "https://s2.coinmarketcap.com/static/img/coins/64x64/3717.png",
   ETH: "https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png",
   USDC: "https://s2.coinmarketcap.com/static/img/coins/64x64/3408.png",
+  STRK: "https://starknet.io/favicon.ico",
 } as const;
 
 export const POOL_ICONS = {

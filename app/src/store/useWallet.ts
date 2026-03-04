@@ -48,6 +48,8 @@ type WalletState = {
   /** Live instances for swap (not persisted). */
   bitcoinWalletInstance: BitcoinWalletInstance;
   starknetSigner: StarknetSigner | null;
+  /** Raw Starknet account for earn/staking (starkzap); set when connecting via extension. */
+  starknetAccount: WalletAccount | null;
 
   detectProviders: () => void;
   connectBitcoin: (walletType: "xverse" | "unisat") => Promise<void>;
@@ -56,6 +58,8 @@ type WalletState = {
   disconnectBitcoin: () => void;
   disconnectStarknet: () => Promise<void>;
   disconnectPrivyStarknet: () => void;
+  /** Restore starknetAccount after refresh when we have starknetAddress (extension only). */
+  tryRestoreStarknetAccount: () => Promise<void>;
 };
 
 export const useWallet = create<WalletState>()(
@@ -72,6 +76,7 @@ export const useWallet = create<WalletState>()(
       starknetSource: null,
       bitcoinWalletInstance: null,
       starknetSigner: null,
+      starknetAccount: null,
 
       detectProviders: () => {
         if (typeof window === "undefined") return;
@@ -155,6 +160,7 @@ export const useWallet = create<WalletState>()(
             starknetWalletName: swo.name,
             starknetSource: "extension",
             starknetSigner: signer,
+            starknetAccount: walletAccount,
             connected: true,
             isConnecting: false,
           });
@@ -196,6 +202,7 @@ export const useWallet = create<WalletState>()(
           starknetWalletName: null,
           starknetSource: null,
           starknetSigner: null,
+          starknetAccount: null,
           connected: Boolean(get().bitcoinPaymentAddress),
         });
       },
@@ -207,8 +214,32 @@ export const useWallet = create<WalletState>()(
           starknetWalletName: null,
           starknetSource: null,
           starknetSigner: null,
+          starknetAccount: null,
           connected: Boolean(get().bitcoinPaymentAddress),
         });
+      },
+
+      tryRestoreStarknetAccount: async () => {
+        const current = get();
+        if (current.starknetAccount || !current.starknetAddress) return;
+        if (current.starknetSource === "privy") return;
+        try {
+          const swo = await connect({ modalMode: "neverAsk" });
+          if (!swo) return;
+          const walletAccount = await WalletAccount.connect(
+            new RpcProviderWithRetries({ nodeUrl: STARKNET_RPC_URL }),
+            swo
+          );
+          const signer = new StarknetSigner(walletAccount);
+          set({
+            starknetWalletName: swo.name,
+            starknetSource: "extension",
+            starknetSigner: signer,
+            starknetAccount: walletAccount,
+          });
+        } catch {
+          // Silent fail
+        }
       },
     }),
     {
@@ -218,6 +249,7 @@ export const useWallet = create<WalletState>()(
         starknetAddress: state.starknetAddress,
         bitcoinWalletType: state.bitcoinWalletType,
         starknetWalletName: state.starknetWalletName,
+        starknetSource: state.starknetSource,
         connected: state.connected,
       }),
       onRehydrateStorage: () => (_, err) => {
