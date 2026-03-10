@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import WalletConnectionModal from "@/components/ui/WalletConnectionModal";
 import { PrivyStarknetSync } from "@/components/PrivyStarknetSync";
 import { useWallet } from "@/store/useWallet";
@@ -99,9 +100,11 @@ function AppWithConnectModal() {
 export default function App() {
   return (
     <ChainDataProvider>
-      <BrowserRouter>
-        <AppWithConnectModal />
-      </BrowserRouter>
+      <TooltipPrimitive.Provider delayDuration={200}>
+        <BrowserRouter>
+          <AppWithConnectModal />
+        </BrowserRouter>
+      </TooltipPrimitive.Provider>
     </ChainDataProvider>
   );
 }
