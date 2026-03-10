@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   getLoanOffers,
   type LoanOfferItem,
-  type BridgeOrderPayment,
 } from "@/lib/amplifi-api";
 import { getAssetIconUrl, getProtocolIconUrl, LOGOS } from "@/lib/constants";
 import { LoanStatusPanel } from "../LoanStatusPanel";
@@ -16,23 +15,15 @@ function formatPct(n: number): string {
 
 export interface LoanFlowState {
   orderId: string;
-  depositAddress?: string;
-  amountSats?: string;
-  payment?: BridgeOrderPayment;
 }
 
 export interface BorrowOffersProps {
-  /** When set, offers are fetched with this and targetLtv so quote (e.g. liquidation price) is for the user's selection. */
   borrowUsd?: number;
   targetLtv?: number;
   selectedOffer?: { item: LoanOfferItem; isBest: boolean } | null;
   onSelectOffer?: (offer: { item: LoanOfferItem; isBest: boolean } | null) => void;
-  /** When set, loan is in progress - show status panel and keep offer detail visible. */
   loanFlow?: LoanFlowState | null;
-  /** When true, BTC send popup is open / user is signing. */
   isSendingBtc?: boolean;
-  /** Called when user clicks Sign for PSBT flow */
-  onSignPsbt?: (orderId: string, payment: Extract<BridgeOrderPayment, { type: "FUNDED_PSBT" } | { type: "RAW_PSBT" }>) => void;
 }
 
 export function BorrowOffers({
@@ -42,7 +33,6 @@ export function BorrowOffers({
   onSelectOffer,
   loanFlow,
   isSendingBtc,
-  onSignPsbt,
 }: BorrowOffersProps) {
   const [offers, setOffers] = useState<LoanOfferItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,11 +79,7 @@ export function BorrowOffers({
           {loanFlow && (
             <LoanStatusPanel
               orderId={loanFlow.orderId}
-              depositAddress={loanFlow.depositAddress}
-              amountSats={loanFlow.amountSats}
-              payment={loanFlow.payment}
               isSendingBtc={isSendingBtc}
-              onSignPsbt={onSignPsbt}
             />
           )}
           <p className="text-sm text-amplifi-muted">No offer selected.</p>
@@ -120,11 +106,7 @@ export function BorrowOffers({
         {loanFlow && (
           <LoanStatusPanel
             orderId={loanFlow.orderId}
-            depositAddress={loanFlow.depositAddress}
-            amountSats={loanFlow.amountSats}
-            payment={loanFlow.payment}
             isSendingBtc={isSendingBtc}
-            onSignPsbt={onSignPsbt}
           />
         )}
         <p className="mb-6 flex items-center gap-2 text-base text-amplifi-text">

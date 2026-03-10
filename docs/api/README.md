@@ -152,7 +152,9 @@ Query params:
 
 - `collateral`: required (symbol like `WBTC` or token address)
 - `borrow`: required (symbol like `USDC` or token address)
-- `borrowUsd`: optional, positive number
+- `mode`: optional, one of `borrowToCollateral | collateralToBorrow` (default: `borrowToCollateral`)
+- `borrowUsd`: optional, positive number (used by `borrowToCollateral`)
+- `collateralAmount`: optional, positive number (required by `collateralToBorrow`)
 - `targetLtv`: optional, number in `(0, 1]`
 - `sortBy`: optional, one of `netApy | maxLtv | liquidationPrice` (default: `netApy`)
 - `sortOrder`: optional, one of `asc | desc` (default: `desc`)
@@ -168,16 +170,26 @@ Behavior:
   - `borrowApr` from borrow asset stats
   - `collateralApr` from collateral `btcFiSupplyApr` when present, otherwise `supplyApy`
   - `netApy = collateralApr - borrowApr`
-- If `borrowUsd` and `targetLtv` are provided, computes:
+- In `borrowToCollateral` mode, if `borrowUsd` and `targetLtv` are provided, computes:
   - `requiredCollateralUsd = borrowUsd / targetLtv`
   - `requiredCollateralAmount = requiredCollateralUsd / collateralPriceUsd`
   - `liquidationPrice = collateralPriceUsd * (targetLtv / liquidationFactor)`
+- In `collateralToBorrow` mode (`collateralAmount` required), computes:
+  - `effectiveLtv = targetLtv ?? maxLtv`
+  - `collateralUsd = collateralAmount * collateralPriceUsd`
+  - `maxBorrowUsd = collateralUsd * effectiveLtv`
+  - `maxBorrowAmount = maxBorrowUsd / borrowPriceUsd`
+  - `liquidationPrice = collateralPriceUsd * (effectiveLtv / liquidationFactor)`
 - If quote inputs are missing, quote values are `null`
 - If `targetLtv` exceeds a pair's `maxLtv`, that offer is excluded
 
 Example:
 
 `GET /api/offers/loan?collateral=WBTC&borrow=USDC&borrowUsd=2000&targetLtv=0.5&sortBy=netApy&sortOrder=desc&page=1&limit=10`
+
+Reverse mode example:
+
+`GET /api/offers/loan?collateral=WBTC&borrow=USDC&mode=collateralToBorrow&collateralAmount=0.1&targetLtv=0.5&page=1&limit=10`
 
 Response shape:
 
@@ -198,7 +210,12 @@ Response shape:
         "collateralApr": 0.03,
         "netApy": -0.03,
         "quote": {
+          "mode": "borrowToCollateral",
           "borrowUsd": 2000,
+          "collateralAmount": null,
+          "collateralUsd": null,
+          "maxBorrowUsd": null,
+          "maxBorrowAmount": null,
           "targetLtv": 0.5,
           "requiredCollateralUsd": 4000,
           "requiredCollateralAmount": 0.0666666667,
@@ -214,6 +231,110 @@ Response shape:
     "totalPages": 1,
     "hasNextPage": false,
     "hasPrevPage": false
+  }
+}
+```
+
+## Earn Endpoints
+
+All earn data is protocol-tagged and paginated. Supports multiprotocol aggregation (e.g. `native_staking`).
+
+Pagination: same as aggregator (`page`, `limit`, `meta`).
+
+### `GET /api/earn/pools`
+
+Query params:
+
+- `protocol`: filter by protocol (optional)
+- `validator`: filter by validator staker address (optional)
+- `page`, `limit` (optional pagination)
+
+Example:
+
+`GET /api/earn/pools?protocol=native_staking&page=1&limit=10`
+
+Response item shape:
+
+```json
+{
+  "protocol": "native_staking",
+  "data": {
+    "id": "0xval:0xpool",
+    "poolContract": "0x...",
+    "validator": { "name": "Validator", "stakerAddress": "0x..." },
+    "token": { "symbol": "STRK", "address": "0x...", "decimals": 18 },
+    "delegatedAmount": "1000",
+    "commissionPercent": 10
+  }
+}
+```
+
+### `GET /api/earn/positions`
+
+Query params:
+
+- `walletAddress`: required
+- `protocol`: filter by protocol (optional)
+- `page`, `limit` (optional pagination)
+
+Example:
+
+`GET /api/earn/positions?walletAddress=0x...&page=1&limit=20`
+
+Response item shape:
+
+```json
+{
+  "protocol": "native_staking",
+  "data": {
+    "poolContract": "0x...",
+    "token": { "symbol": "STRK", "address": "0x...", "decimals": 18 },
+    "staked": "100",
+    "rewards": "5",
+    "total": "105",
+    "unpooling": "0",
+    "unpoolTime": null,
+    "commissionPercent": 10,
+    "rewardAddress": "0x...",
+    "walletAddress": "0x..."
+  }
+}
+```
+
+### `GET /api/earn/users/:address/history`
+
+Path params:
+
+- `address`: required (Starknet address)
+
+Query params:
+
+- `protocol`: filter by protocol (optional)
+- `type`: filter by event type (`stake` | `add` | `claim` | `exit_intent` | `exit`) (optional)
+- `page`, `limit` (optional pagination)
+
+Behavior:
+
+- Fetches stake/claim history on-demand from RPC (last 10 pages or 24h blocks)
+- Returns entries tagged with protocol
+
+Example:
+
+`GET /api/earn/users/0x.../history?type=stake&page=1&limit=20`
+
+Response item shape:
+
+```json
+{
+  "protocol": "native_staking",
+  "data": {
+    "type": "stake",
+    "poolContract": "0x...",
+    "txHash": "0x...",
+    "timestamp": 1700000000,
+    "amount": "100",
+    "token": { "symbol": "STRK", "address": "0x...", "decimals": 18 },
+    "userAddress": "0x..."
   }
 }
 ```
@@ -248,24 +369,33 @@ Request body:
 
 ```json
 {
-  "network": "mainnet",
   "sourceAsset": "BTC",
   "destinationAsset": "USDC",
-  "amount": "100000",
+  "amount": "10000000",
   "amountType": "exactIn",
   "receiveAddress": "0x0123...starknet",
-  "walletAddress": "0xabc..."
+  "walletAddress": "0xabc...",
+  "bitcoinPaymentAddress": "tb1q...",
+  "bitcoinPublicKey": "03a2..."
 }
 ```
 
 Validation:
 
-- `network`: `mainnet | testnet`
 - `sourceAsset`: must be `BTC`
 - `destinationAsset`: one of `USDC | ETH | STRK | WBTC | USDT | TBTC`
-- `amount`: positive integer string
+- `amount`: base units as string (e.g. `"10000000"` for 0.1 BTC, 1 BTC = 100_000_000). For `exactIn`: source token base units. For `exactOut`: destination token base units. DB stores base units; only Atomiq SDK receives decimal conversion.
 - `amountType`: `exactIn | exactOut`
 - `receiveAddress`: validated with `starknet.js` (`validateAndParseAddress`)
+- `bitcoinPaymentAddress` and `bitcoinPublicKey`: optional, but must be provided together for Option A (FUNDED_PSBT path)
+
+Notes:
+
+- `network` is not accepted from request body.
+- Active bridge network is server-configured in `api/Settings.toml` via:
+  - `network = "mainnet" | "testnet"`
+  - `rpc_url = "<starknet-rpc-url>"`
+- For full payment flow details, see [Bridge Flow](../BRIDGE_FLOW.md).
 
 Response:
 
@@ -274,46 +404,38 @@ Response:
   "data": {
     "orderId": "uuid",
     "status": "CREATED",
+    "depositAddress": "bc1...",
+    "amountSats": "10000000",
+    "payment": {
+      "type": "ADDRESS",
+      "address": "bc1...",
+      "amountSats": "10000000",
+      "hyperlink": "bitcoin:bc1...?amount=0.1"
+    },
     "quote": {
-      "amountIn": "100000",
+      "amountIn": "10000000",
       "amountOut": "9990000",
-      "depositAddress": "bc1..."
+      "depositAddress": "bc1...",
+      "bitcoinPayment": {
+        "type": "ADDRESS",
+        "address": "bc1...",
+        "amountSats": "10000000",
+        "hyperlink": "bitcoin:bc1...?amount=0.1"
+      }
     },
     "expiresAt": "2026-03-01T00:00:00.000Z"
   }
 }
 ```
 
-### `POST /api/bridge/orders/:id/prepare`
-
-Build user-side action payload for funding/signing.
-
-Response action variants:
-
-- `SIGN_PSBT`:
-  - `psbtBase64`
-  - `signInputs`
-- `ADDRESS`:
-  - `depositAddress`
-  - `amountSats`
-
-### `POST /api/bridge/orders/:id/submit`
-
-Submit signed funding payload.
-
-Request body:
-
-```json
-{
-  "signedPsbtBase64": "cHNidP8B...",
-  "sourceTxId": "optional-if-no-psbt"
-}
-```
-
-Notes:
-
-- At least one of `signedPsbtBase64` or `sourceTxId` is required.
-- Quote expiry is checked before submit.
+- `depositAddress`: BTC address to send to. Send exactly `amountSats` satoshis in a single transaction.
+- `amountSats`: Amount to send in satoshis.
+- `payment`: Normalized Bitcoin payment instructions from Atomiq.
+  - `type = "ADDRESS"`: send BTC directly to `address` (optional `hyperlink` can be used as QR payload).
+  - `type = "FUNDED_PSBT"`: sign `psbtHex` or `psbtBase64` with your Bitcoin wallet and sign only `signInputs`, then submit signed PSBT via `POST /api/bridge/orders/:id/submit-psbt`. Taproot inputs must include `tapInternalKey`/`tapBip32Derivation` (validated server-side).
+  - `type = "RAW_PSBT"`: construct/sign from raw PSBT (uses `in1sequence` rules from Atomiq docs) and submit signed PSBT via `POST /api/bridge/orders/:id/submit-psbt`. Taproot validation is skipped for RAW_PSBT (wallet may add metadata).
+- **Bypass**: Set `BRIDGE_PSBT_SKIP_TAPROOT_VALIDATION=1` or `bridge_psbt_skip_taproot_validation = true` in Settings.toml to allow FUNDED_PSBT with incomplete Taproot metadata (signing may still fail in wallet).
+- `quote.amountIn` and `quote.amountOut`: also returned in base units (same convention as `amount`).
 
 ### `GET /api/bridge/orders/:id`
 
@@ -331,21 +453,48 @@ Wallet-based order history (paginated). Address lookup is normalized to lowercas
 
 Manually trigger reconcile/recovery for an order.
 
+### `POST /api/bridge/orders/:id/submit-psbt`
+
+Submit a signed PSBT for FUNDED_PSBT or RAW_PSBT payment flows.
+
+Request body:
+
+```json
+{
+  "signedPsbt": "cHNidP8BA..."
+}
+```
+
+Response:
+
+```json
+{
+  "data": {
+    "txId": "btc-tx-id"
+  }
+}
+```
+
 ## Bridge Recovery
 
-The backend runs a periodic poller and attempts:
+The backend runs a periodic poller that:
 
-- auto-claim when swap becomes claimable
-- auto-refund when swap becomes refundable
-- action/event logging in `bridge_actions` and `bridge_events`
+- Polls Atomiq for swap state (Atomiq auto-detects funding tx on the deposit address)
+- Auto-claims when swap becomes claimable
+- Auto-refunds when swap becomes refundable
+- Logs actions/events in `bridge_actions` and `bridge_events`
 
-## Frontend Flow (PSBT path)
+For `ADDRESS` payments, no PSBT submit step is required. For `FUNDED_PSBT` and `RAW_PSBT`, frontend should submit signed PSBT to `POST /api/bridge/orders/:id/submit-psbt`.
 
-1. Create order (`POST /orders`)
-2. Prepare action payload (`POST /orders/:id/prepare`)
-3. Sign `psbtBase64` in BTC wallet
-4. Submit signature (`POST /orders/:id/submit`)
-5. Poll status (`GET /orders/:id`) or use history (`GET /orders`)
+## Frontend Flow
+
+1. Create order (`POST /orders`) with standard fields and optional `bitcoinPaymentAddress` + `bitcoinPublicKey` for Option A.
+2. Handle payment by `payment.type`:
+   - `ADDRESS`: send exact sats to deposit address.
+   - `FUNDED_PSBT` / `RAW_PSBT`: sign PSBT in frontend wallet and call `POST /orders/:id/submit-psbt`.
+3. Poll status (`GET /orders/:id`) or use history (`GET /orders`) while backend poller reconciles the swap.
+
+See full flow details in [Bridge Flow](../BRIDGE_FLOW.md).
 
 ## Wallet Endpoints (write / non-read-only)
 

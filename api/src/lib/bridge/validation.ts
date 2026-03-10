@@ -1,20 +1,17 @@
 import { validateAndParseAddress } from "starknet";
 import { asString } from "../aggregatorUtils.js";
-import { BridgeAmountType, BridgeCreateOrderInput, BridgeNetwork } from "./types.js";
+import { settings } from "../settings.js";
+import { BridgeAmountType, BridgeCreateOrderInput, BridgeOrderAction, BridgeOrderStatus } from "./types.js";
 
-const SUPPORTED_NETWORKS: BridgeNetwork[] = ["mainnet", "testnet"];
 const SUPPORTED_DESTINATION_ASSETS = new Set(["USDC", "ETH", "STRK", "WBTC", "USDT", "TBTC"]);
+
+const VALID_STATUSES: Set<string> = new Set([
+  "CREATED", "SWAP_CREATED", "BTC_SENT", "BTC_CONFIRMED",
+  "CLAIMING", "SETTLED", "FAILED", "EXPIRED", "REFUNDED",
+]);
 
 export function normalizeWalletAddress(value: string): string {
   return value.trim().toLowerCase();
-}
-
-export function validateNetwork(value: unknown): BridgeNetwork {
-  const normalized = asString(value).trim().toLowerCase();
-  if (!SUPPORTED_NETWORKS.includes(normalized as BridgeNetwork)) {
-    throw new Error("network must be one of: mainnet, testnet");
-  }
-  return normalized as BridgeNetwork;
 }
 
 export function validateAmountType(value: unknown): BridgeAmountType {
@@ -58,6 +55,22 @@ export function validateStarknetReceiveAddress(value: unknown): string {
   }
 }
 
+export function validateAction(value: unknown): BridgeOrderAction {
+  const normalized = asString(value).trim();
+  if (normalized !== "swap" && normalized !== "borrow") {
+    throw new Error("action must be one of: swap, borrow");
+  }
+  return normalized;
+}
+
+export function validateStatus(value: unknown): BridgeOrderStatus {
+  const normalized = asString(value).trim();
+  if (!VALID_STATUSES.has(normalized)) {
+    throw new Error(`status must be one of: ${[...VALID_STATUSES].join(", ")}`);
+  }
+  return normalized as BridgeOrderStatus;
+}
+
 export function validateCreateOrderPayload(payload: unknown): BridgeCreateOrderInput {
   const body = (payload ?? {}) as Record<string, unknown>;
   const sourceAsset = asString(body.sourceAsset).trim().toUpperCase();
@@ -71,12 +84,13 @@ export function validateCreateOrderPayload(payload: unknown): BridgeCreateOrderI
   }
 
   return {
-    network: validateNetwork(body.network),
+    network: settings.network,
     sourceAsset: "BTC",
     destinationAsset: validateDestinationAsset(body.destinationAsset),
     amount: validatePositiveIntegerString(body.amount, "amount"),
     amountType: validateAmountType(body.amountType),
     receiveAddress: validateStarknetReceiveAddress(body.receiveAddress),
     walletAddress,
+    action: body.action ? validateAction(body.action) : "swap",
   };
 }

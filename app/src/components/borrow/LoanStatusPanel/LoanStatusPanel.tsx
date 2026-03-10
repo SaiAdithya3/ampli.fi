@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { getBridgeOrder, type BridgeOrderDetail, type BridgeOrderPayment } from "@/lib/amplifi-api";
+import { getOrder, type BridgeOrder } from "@/lib/amplifi-api";
 import { LOGOS } from "@/lib/constants";
 
 const POLL_INTERVAL_MS = 3000;
-const SATS_PER_BTC = 100_000_000;
 
 const STEPS = [
   { id: 1, label: "Order Created" },
@@ -13,46 +12,26 @@ const STEPS = [
   { id: 5, label: "Position Active" },
 ] as const;
 
-/** Maps bridge order status to the active step (1-based). */
+/** Maps order status to the active step (1-based). */
 function statusToStep(status: string): number {
   const s = status?.toUpperCase?.() ?? "";
-  if (s === "CREATED" || s === "AWAITING_USER_SIGNATURE") return 2;
-  if (s === "SOURCE_SUBMITTED") return 3;
-  if (s === "SOURCE_CONFIRMED") return 3;
+  if (s === "CREATED" || s === "SWAP_CREATED") return 2;
+  if (s === "BTC_SENT") return 3;
+  if (s === "BTC_CONFIRMED" || s === "CLAIMING") return 4;
   if (s === "SETTLED") return 5;
   return 2;
 }
 
-export interface LoanFlowState {
-  orderId: string;
-  status: string;
-  depositAddress?: string;
-  amountSats?: string;
-  error?: string;
-}
-
 export interface LoanStatusPanelProps {
   orderId: string;
-  depositAddress?: string;
-  amountSats?: string;
-  /** PSBT flow: when present, user must sign this PSBT */
-  payment?: BridgeOrderPayment;
   isSendingBtc?: boolean;
-  /** Called when user clicks Sign for PSBT flow */
-  onSignPsbt?: (orderId: string, payment: Extract<BridgeOrderPayment, { type: "FUNDED_PSBT" } | { type: "RAW_PSBT" }>) => void;
-  onStatusChange?: (state: LoanFlowState) => void;
 }
 
 export function LoanStatusPanel({
   orderId,
-  depositAddress: initialDepositAddress,
-  amountSats: initialAmountSats,
-  payment,
   isSendingBtc,
-  onSignPsbt,
-  onStatusChange,
 }: LoanStatusPanelProps) {
-  const [order, setOrder] = useState<BridgeOrderDetail | null>(null);
+  const [order, setOrder] = useState<BridgeOrder | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -62,21 +41,11 @@ export function LoanStatusPanel({
     const poll = async () => {
       if (cancelled || !orderId) return;
       try {
-        const res = await getBridgeOrder(orderId);
-        const detail: BridgeOrderDetail | null =
-          (res as { data?: BridgeOrderDetail }).data ??
-          (typeof (res as BridgeOrderDetail).status === "string" ? (res as BridgeOrderDetail) : null);
-
+        const res = await getOrder(orderId);
         if (cancelled) return;
-        if (detail && !Array.isArray(detail)) {
-          setOrder(detail);
-          setError(detail.error ?? null);
-          onStatusChange?.({
-            orderId,
-            status: detail.status,
-            depositAddress: detail.quote?.depositAddress ?? initialDepositAddress,
-            amountSats: detail.quote?.amountIn ?? initialAmountSats,
-          });
+        if (res.data) {
+          setOrder(res.data);
+          setError(res.data.lastError ?? null);
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to fetch status");
@@ -90,13 +59,10 @@ export function LoanStatusPanel({
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [orderId, initialDepositAddress, initialAmountSats, onStatusChange]);
+  }, [orderId]);
 
   const status = order?.status ?? "CREATED";
   const activeStep = statusToStep(status);
-  const depositAddress = order?.quote?.depositAddress ?? initialDepositAddress;
-  const amountSats = order?.quote?.amountIn ?? initialAmountSats;
-  const amountBtc = amountSats ? (parseInt(amountSats, 10) / SATS_PER_BTC).toFixed(8) : null;
 
   return (
     <div className="mb-6">
@@ -110,7 +76,7 @@ export function LoanStatusPanel({
           const isActive = step.id === activeStep;
           const showLoading =
             isActive &&
-            (isSendingBtc || status === "CREATED" || status === "AWAITING_USER_SIGNATURE");
+            (isSendingBtc || status === "CREATED" || status === "SWAP_CREATED");
 
           const stepNumberBg = isComplete
             ? "bg-[#F3FDF6]"
@@ -153,35 +119,6 @@ export function LoanStatusPanel({
           );
         })}
       </ol>
-
-      {(depositAddress || payment) && amountBtc && activeStep <= 2 && (
-        <div className="mt-4 rounded-lg border border-amplifi-border bg-amplifi-surface-muted/50 p-4 text-sm">
-          <p className="mb-2 font-medium text-amplifi-text">
-            {payment && (payment.type === "FUNDED_PSBT" || payment.type === "RAW_PSBT")
-              ? isSendingBtc
-                ? "Sign the transaction in your Bitcoin wallet"
-                : "Sign the transaction in your Bitcoin wallet to complete your deposit"
-              : isSendingBtc
-                ? "Sign the transaction in your Bitcoin wallet to send the deposit"
-                : "Send BTC to complete your deposit"}
-          </p>
-          <p className="mb-1 text-amplifi-muted">Amount: {amountBtc} BTC</p>
-          {depositAddress ? (
-            <p className="break-all font-mono text-xs text-amplifi-text">{depositAddress}</p>
-          ) : payment && (payment.type === "FUNDED_PSBT" || payment.type === "RAW_PSBT") && onSignPsbt ? (
-            <button
-              type="button"
-              disabled={isSendingBtc}
-              onClick={() => onSignPsbt(orderId, payment)}
-              className="mt-2 rounded-lg bg-amplifi-primary px-4 py-2 text-sm font-medium text-white hover:bg-amplifi-primary-hover disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSendingBtc ? "Signing…" : "Sign with Bitcoin wallet"}
-            </button>
-          ) : payment && (payment.type === "FUNDED_PSBT" || payment.type === "RAW_PSBT") ? (
-            <p className="text-amplifi-muted">Connect your Bitcoin wallet to sign.</p>
-          ) : null}
-        </div>
-      )}
 
       {error && (
         <p className="mt-4 text-sm text-red-600">{error}</p>

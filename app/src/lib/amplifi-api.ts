@@ -229,67 +229,55 @@ export async function getLoanOffers(
 }
 
 // ---------------------------------------------------------------------------
-// Bridge – /api/bridge/orders
+// Bridge Orders – /api/bridge/orders (tracking API)
 // ---------------------------------------------------------------------------
 
-export interface PaymentAddress {
-  type: "ADDRESS";
-  address: string;
-  amountSats: string;
+export type BridgeOrderStatus =
+  | "CREATED"
+  | "SWAP_CREATED"
+  | "BTC_SENT"
+  | "BTC_CONFIRMED"
+  | "CLAIMING"
+  | "SETTLED"
+  | "FAILED"
+  | "EXPIRED"
+  | "REFUNDED";
+
+export interface BridgeOrder {
+  id: string;
+  network: string;
+  sourceAsset: string;
+  destinationAsset: string;
+  amount: string;
+  amountType: string;
+  amountSource: string | null;
+  amountDestination: string | null;
+  depositAddress: string | null;
+  receiveAddress: string;
+  walletAddress: string;
+  status: BridgeOrderStatus;
+  action: "swap" | "borrow";
+  atomiqSwapId: string | null;
+  sourceTxId: string | null;
+  destinationTxId: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
-export interface PaymentFundedPsbt {
-  type: "FUNDED_PSBT";
-  psbtBase64: string;
-  psbtHex?: string;
-  /** Input indices to sign; if omitted, frontend defaults to [0..inputsLength-1] */
-  signInputs?: number[];
-}
-
-export interface PaymentRawPsbt {
-  type: "RAW_PSBT";
-  psbtBase64: string;
-  psbtHex?: string;
-  /** Input indices to sign; if omitted, frontend defaults to [0..inputsLength-1] */
-  signInputs?: number[];
-  in1sequence?: number;
-}
-
-export type BridgeOrderPayment =
-  | PaymentAddress
-  | PaymentFundedPsbt
-  | PaymentRawPsbt;
-
-export interface BridgeOrderQuote {
-  amountIn: string;
-  amountOut: string;
-  depositAddress?: string;
-}
-
-export interface BridgeOrderCreated {
-  orderId: string;
-  status: string;
-  depositAddress?: string;
-  amountSats?: string;
-  payment?: BridgeOrderPayment;
-  quote?: BridgeOrderQuote;
-}
-
-export interface CreateBridgeOrderBody {
+export interface CreateOrderBody {
   sourceAsset: "BTC";
-  destinationAsset: "USDC" | "ETH" | "STRK" | "WBTC" | "USDT" | "TBTC";
+  destinationAsset: string;
   amount: string;
   amountType: "exactIn" | "exactOut";
   receiveAddress: string;
   walletAddress: string;
-  /** Option A: both required together for FUNDED_PSBT (backend uses Atomiq txsExecute with wallet context) */
-  bitcoinPaymentAddress?: string;
-  bitcoinPublicKey?: string;
+  action?: "swap" | "borrow";
 }
 
-export async function createBridgeOrder(
-  body: CreateBridgeOrderBody
-): Promise<{ data: BridgeOrderCreated }> {
+export async function createOrder(
+  body: CreateOrderBody
+): Promise<{ data: { orderId: string; status: string; createdAt: string } }> {
   const res = await fetch(`${API_URL}/api/bridge/orders`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -302,62 +290,66 @@ export async function createBridgeOrder(
   return res.json();
 }
 
-export async function submitBridgeOrder(
-  orderId: string,
-  body: { signedPsbtBase64?: string; sourceTxId?: string }
-): Promise<unknown> {
-  const res = await fetch(`${API_URL}/api/bridge/orders/${encodeURIComponent(orderId)}/submit-psbt`, {
-    method: "POST",
+export async function updateAtomiqSwapId(orderId: string, atomiqSwapId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/bridge/orders/${encodeURIComponent(orderId)}/atomiq-swap-id`, {
+    method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ atomiqSwapId }),
   });
-  if (!res.ok) throw new Error(`Submit order failed: ${res.status}`);
-  return res.json();
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error ?? `Update atomiq swap id failed: ${res.status}`);
+  }
 }
 
-export interface BridgeOrderDetail {
-  orderId: string;
-  status: string;
-  quote?: {
-    amountIn: string;
-    amountOut: string;
-    depositAddress?: string;
-  };
-  sourceTxId?: string;
-  destinationTxId?: string;
-  expiresAt?: string;
-  rawState?: unknown;
-  error?: string;
+export async function updateBtcTxHash(orderId: string, btcTxHash: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/bridge/orders/${encodeURIComponent(orderId)}/btc-tx`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ btcTxHash }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error ?? `Update btc tx hash failed: ${res.status}`);
+  }
 }
 
-export async function getBridgeOrder(orderId: string): Promise<{ data?: BridgeOrderDetail } & Partial<BridgeOrderDetail>> {
+export async function updateOrderStatus(
+  orderId: string,
+  status: BridgeOrderStatus,
+  payload?: { destinationTxId?: string; lastError?: string }
+): Promise<void> {
+  const res = await fetch(`${API_URL}/api/bridge/orders/${encodeURIComponent(orderId)}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status, ...payload }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error ?? `Update order status failed: ${res.status}`);
+  }
+}
+
+export async function getOrder(orderId: string): Promise<{ data: BridgeOrder }> {
   const res = await fetch(`${API_URL}/api/bridge/orders/${encodeURIComponent(orderId)}`);
   if (!res.ok) throw new Error(`Get order failed: ${res.status}`);
   return res.json();
 }
 
-export interface BridgeOrdersListParams {
+export interface OrdersListParams {
   walletAddress: string;
   page?: number;
   limit?: number;
 }
 
-export async function getBridgeOrders(
-  params: BridgeOrdersListParams
-): Promise<{ data: unknown[]; meta?: PaginationMeta }> {
+export async function getOrders(
+  params: OrdersListParams
+): Promise<{ data: BridgeOrder[]; meta: PaginationMeta }> {
   const search = new URLSearchParams({ walletAddress: params.walletAddress });
   if (params.page != null) search.set("page", String(params.page));
   if (params.limit != null) search.set("limit", String(params.limit));
   const res = await fetch(`${API_URL}/api/bridge/orders?${search.toString()}`);
-  if (!res.ok) throw new Error(`Bridge orders list failed: ${res.status}`);
-  return res.json();
-}
-
-export async function retryBridgeOrder(orderId: string): Promise<unknown> {
-  const res = await fetch(`${API_URL}/api/bridge/orders/${encodeURIComponent(orderId)}/retry`, {
-    method: "POST",
-  });
-  if (!res.ok) throw new Error(`Retry order failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Orders list failed: ${res.status}`);
   return res.json();
 }
 

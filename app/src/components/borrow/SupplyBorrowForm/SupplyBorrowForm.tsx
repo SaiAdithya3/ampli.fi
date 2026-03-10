@@ -136,15 +136,22 @@ export function SupplyBorrowForm({
     }
   };
 
-  const handleInitiateClick = () => {
+  const [isInitiating, setIsInitiating] = useState(false);
+
+  const handleInitiateClick = async () => {
     if (!isOfferSelected || !onInitiateLoan) return;
     if (btcEquivalent == null || btcEquivalent <= 0) return;
     if (borrowAmountNum <= 0) return;
-    onInitiateLoan({
-      btcEquivalent,
-      supplyAmountUsd: supplyAmountNum,
-      borrowAmountUsd: borrowAmountNum,
-    });
+    setIsInitiating(true);
+    try {
+      await onInitiateLoan({
+        btcEquivalent,
+        supplyAmountUsd: supplyAmountNum,
+        borrowAmountUsd: borrowAmountNum,
+      });
+    } finally {
+      setIsInitiating(false);
+    }
   };
 
   return (
@@ -315,10 +322,10 @@ export function SupplyBorrowForm({
         variant="primary"
         size="lg"
         className="w-full"
-        disabled={isOfferSelected && (!starknetAddress || btcEquivalent == null || btcEquivalent <= 0)}
+        disabled={isInitiating || (isOfferSelected && (!starknetAddress || btcEquivalent == null || btcEquivalent <= 0))}
         onClick={isOfferSelected ? handleInitiateClick : undefined}
       >
-        {isOfferSelected ? "Initiate Loan" : "Get the Loan"}
+        {isInitiating ? "Initiating…" : isOfferSelected ? "Initiate Loan" : "Get the Loan"}
       </Button>
     </div>
   );

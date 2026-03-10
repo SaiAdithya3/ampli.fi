@@ -8,17 +8,19 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p .",
     "test": "tsx --test tests/**/*.test.ts",
-    "start": "node dist/server.js"
+    "start": "bun dist/server.js"
   },
   "dependencies": {
-    "@atomiqlabs/chain-starknet": "^8.1.10",
-    "@atomiqlabs/sdk": "^8.3.5",
+    "@iarna/toml": "^2.2.5",
     "@privy-io/node": "^0.9.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
     "pg": "^8.19.0",
-    "starknet": "^9.2.1"
+    "pino": "^10.3.1",
+    "starknet": "^9.2.1",
+    "starkzap": "^1.0.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
