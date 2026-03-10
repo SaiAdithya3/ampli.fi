@@ -78,7 +78,7 @@ export function SupplyBorrowForm({
   } | null>(null);
   const [isQuoteLoading, setIsQuoteLoading] = useState(!initialQuote);
   const [fallbackBtcPriceUsd, setFallbackBtcPriceUsd] = useState<number | null>(null);
-  const { balanceFormatted: btcBalanceDisplay, balanceBtc, isLoading: btcBalanceLoading } = useBtcBalance();
+  const { balanceFormatted, balanceBtc, isLoading: btcBalanceLoading } = useBtcBalance();
   const { isWalletReadyForSwap, isWalletRestoring } = useWalletReadyState();
 
   const ltv = ltvPct / 100;
@@ -382,10 +382,10 @@ export function SupplyBorrowForm({
               "—"
             )}
           </div>
-          {!isSwapped && (
+          {!isSwapped && balanceFormatted != null && balanceBtc > 0 && (
             <div className="flex items-center gap-2">
               <span className="text-base text-amplifi-text text-amplifi-muted">
-                {btcBalanceLoading ? "…" : (btcBalanceDisplay ?? "—")}
+                {btcBalanceLoading ? "…" : balanceFormatted}
               </span>
               <button
                 type="button"

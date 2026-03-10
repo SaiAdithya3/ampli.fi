@@ -136,7 +136,7 @@ export const useWallet = create<WalletState>()(
           set({ isConnecting: true });
           const swo = await connect({
             modalMode: "alwaysAsk",
-            modalTheme: "dark",
+            modalTheme: "light",
           });
 
           if (!swo) {
