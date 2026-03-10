@@ -83,11 +83,8 @@ export function getAssetIconUrl(symbol: string): string {
   return `${ASSET_ICON_DEFAULT}${s[0] ?? "?"}`;
 }
 
-<<<<<<< HEAD
 export const POOL_ICON_PLACEHOLDER =
   "https://placehold.co/40x40/033122/ffffff?text=P";
-=======
-export const POOL_ICON_PLACEHOLDER = "https://placehold.co/40x40/033122/ffffff?text=P";
 
 /** Staking protocol icons for Earn page pools. */
 export const STAKING_PROTOCOL_ICONS: Record<string, string> = {
@@ -99,4 +96,3 @@ export function getStakingProtocolIconUrl(protocol: string): string | null {
   const key = protocol?.toLowerCase?.() ?? "";
   return STAKING_PROTOCOL_ICONS[key] ?? null;
 }
->>>>>>> a2132c5d207288ddcbb67460d0181a4bd533ca1f
