@@ -16,6 +16,7 @@
     "@scure/btc-signer": "^1.6.0",
     "@starknet-io/get-starknet": "^4.0.3",
     "clsx": "^2.1.1",
+    "motion": "^12.35.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.13.1",

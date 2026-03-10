@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import Button from "@/components/ui/Button";
 import { useDebounce } from "@/hooks/useDebounce";
 import { getLoanOffers } from "@/lib/amplifi-api";
@@ -265,86 +266,97 @@ export function SupplyBorrowForm({
             </div>
           </div>
         </div>
-        {(!isOfferSelected || isLoanInProgress) && (
-          <div className="mt-4">
-            <div className="mb-1 flex items-center justify-between text-base text-amplifi-text">
-              <span>Loan-to-value (%)</span>
-              <div className="flex items-center gap-1.5">
-                {ltvPct <= 50 && (
-                  <span className="rounded-[4px] text-amplifi-risk-safe bg-amplifi-risk-safe-bg/50 px-1.5 py-0.5 text-sm font-normal tracking-[-0.28px]">
-                    Low risk!
-                  </span>
-                )}
-                {ltvPct > 50 && ltvPct <= 65 && (
-                  <span className="rounded-[4px] text-amplifi-risk-medium bg-amplifi-risk-medium-bg/50 px-1.5 py-0.5 text-sm font-normal tracking-[-0.28px]">
-                    Med risk
-                  </span>
-                )}
-                {ltvPct > 65 && (
-                  <span className="rounded-[4px] text-amplifi-risk-hard bg-amplifi-risk-hard-bg/50 px-1.5 py-0.5 text-sm font-normal tracking-[-0.28px]">
-                    High risk
-                  </span>
-                )}
-                <img src={LOGOS.info} alt="info" className="h-5 w-5 text-amplifi-text" />
+        <AnimatePresence>
+          {(!isOfferSelected || isLoanInProgress) && (
+            <motion.div
+              key="ltv-bar"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.3, ease: "easeInOut" }}
+              style={{ overflow: "hidden" }}
+            >
+              <div className="mt-4">
+                <div className="mb-1 flex items-center justify-between text-base text-amplifi-text">
+                  <span>Loan-to-value (%)</span>
+                  <div className="flex items-center gap-1.5">
+                    {ltvPct <= 50 && (
+                      <span className="rounded-[4px] text-amplifi-risk-safe bg-amplifi-risk-safe-bg/50 px-1.5 py-0.5 text-sm font-normal tracking-[-0.28px]">
+                        Low risk!
+                      </span>
+                    )}
+                    {ltvPct > 50 && ltvPct <= 65 && (
+                      <span className="rounded-[4px] text-amplifi-risk-medium bg-amplifi-risk-medium-bg/50 px-1.5 py-0.5 text-sm font-normal tracking-[-0.28px]">
+                        Med risk
+                      </span>
+                    )}
+                    {ltvPct > 65 && (
+                      <span className="rounded-[4px] text-amplifi-risk-hard bg-amplifi-risk-hard-bg/50 px-1.5 py-0.5 text-sm font-normal tracking-[-0.28px]">
+                        High risk
+                      </span>
+                    )}
+                    <img src={LOGOS.info} alt="info" className="h-5 w-5 text-amplifi-text" />
+                  </div>
+                </div>
+                {/* Custom LTV slider: 0-50 safe (green), 51-65 med (yellow), 66-80 high (red) */}
+                <div className="relative h-8 w-full">
+                  {/* Filled track (left of thumb): solid color based on current risk level */}
+                  <div
+                    className="pointer-events-none absolute top-1/2 h-1 -translate-y-1/2 rounded-l-full"
+                    style={{
+                      width: `${(ltvPct / 80) * 100}%`,
+                      background:
+                        ltvPct <= 50
+                          ? "#00CD3B"
+                          : ltvPct <= 65
+                            ? "#D08700"
+                            : "#DC2626",
+                    }}
+                  />
+                  {/* Unfilled track (right of thumb): gradient at 50% opacity */}
+                  <div
+                    className="pointer-events-none absolute top-1/2 h-1 -translate-y-1/2 overflow-hidden rounded-r-full opacity-50"
+                    style={{
+                      left: `${(ltvPct / 80) * 100}%`,
+                      width: `${((80 - ltvPct) / 80) * 100}%`,
+                    }}
+                  >
+                    <div
+                      className="h-full"
+                      style={{
+                        width: `${(80 / (80 - ltvPct || 1)) * 100}%`,
+                        marginLeft: `${-(ltvPct / (80 - ltvPct || 1)) * 100}%`,
+                        background:
+                          "linear-gradient(to right, #00CD3B 0%, #00CD3B 62.5%, #D08700 62.5%, #D08700 81.25%, #DC2626 81.25%, #DC2626 100%)",
+                      }}
+                    />
+                  </div>
+                  {/* Thumb - pointer-events-none so range input receives clicks */}
+                  <div
+                    className="pointer-events-none absolute top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-[10px] border border-[#8A8A8A] bg-white font-semibold text-amplifi-text"
+                    style={{
+                      width: 48,
+                      height: 32,
+                      left: `clamp(0px, calc(${(ltvPct / 80) * 100}% - 24px), calc(100% - 48px))`,
+                    }}
+                  >
+                    {ltvPct}%
+                  </div>
+                  {/* Invisible range input for interaction */}
+                  <input
+                    type="range"
+                    min="0"
+                    max="80"
+                    value={ltvPct}
+                    onChange={(e) => setLtvPct(Number(e.target.value))}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    aria-label="Loan-to-value percentage"
+                  />
+                </div>
               </div>
-            </div>
-            {/* Custom LTV slider: 0-50 safe (green), 51-65 med (yellow), 66-80 high (red) */}
-            <div className="relative h-8 w-full">
-              {/* Filled track (left of thumb): solid color based on current risk level */}
-              <div
-                className="pointer-events-none absolute top-1/2 h-1 -translate-y-1/2 rounded-l-full"
-                style={{
-                  width: `${(ltvPct / 80) * 100}%`,
-                  background:
-                    ltvPct <= 50
-                      ? "#00CD3B"
-                      : ltvPct <= 65
-                        ? "#D08700"
-                        : "#DC2626",
-                }}
-              />
-              {/* Unfilled track (right of thumb): gradient at 50% opacity */}
-              <div
-                className="pointer-events-none absolute top-1/2 h-1 -translate-y-1/2 overflow-hidden rounded-r-full opacity-50"
-                style={{
-                  left: `${(ltvPct / 80) * 100}%`,
-                  width: `${((80 - ltvPct) / 80) * 100}%`,
-                }}
-              >
-                <div
-                  className="h-full"
-                  style={{
-                    width: `${(80 / (80 - ltvPct || 1)) * 100}%`,
-                    marginLeft: `${-(ltvPct / (80 - ltvPct || 1)) * 100}%`,
-                    background:
-                      "linear-gradient(to right, #00CD3B 0%, #00CD3B 62.5%, #D08700 62.5%, #D08700 81.25%, #DC2626 81.25%, #DC2626 100%)",
-                  }}
-                />
-              </div>
-              {/* Thumb - pointer-events-none so range input receives clicks */}
-              <div
-                className="pointer-events-none absolute top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-[10px] border border-[#8A8A8A] bg-white font-semibold text-amplifi-text"
-                style={{
-                  width: 48,
-                  height: 32,
-                  left: `clamp(0px, calc(${(ltvPct / 80) * 100}% - 24px), calc(100% - 48px))`,
-                }}
-              >
-                {ltvPct}%
-              </div>
-              {/* Invisible range input for interaction */}
-              <input
-                type="range"
-                min="0"
-                max="80"
-                value={ltvPct}
-                onChange={(e) => setLtvPct(Number(e.target.value))}
-                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                aria-label="Loan-to-value percentage"
-              />
-            </div>
-          </div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       <div className="rounded-amplifi bg-white p-4 sm:p-5">
