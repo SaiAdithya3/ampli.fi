@@ -18,16 +18,17 @@ test("PgBridgeRepository.createOrder maps DB row to domain order", async () => {
             destination_asset: "USDC",
             amount: "10000",
             amount_type: "exactIn",
+            amount_source: null,
+            amount_destination: null,
+            deposit_address: null,
             receive_address: "0x0123",
             wallet_address: "0xwallet",
             status: "CREATED",
-            atomiq_swap_id: "swap-1",
+            action: "swap",
+            atomiq_swap_id: null,
             source_tx_id: null,
             destination_tx_id: null,
-            quote_json: { amountIn: "10000", amountOut: "9970000" },
-            expires_at: now,
             last_error: null,
-            raw_state_json: { state: "PR_CREATED" },
             created_at: now,
             updated_at: now,
           },
@@ -38,24 +39,19 @@ test("PgBridgeRepository.createOrder maps DB row to domain order", async () => {
 
   const repository = new PgBridgeRepository(fakePool as any);
   const order = await repository.createOrder({
-    input: {
-      network: "testnet",
-      sourceAsset: "BTC",
-      destinationAsset: "USDC",
-      amount: "10000",
-      amountType: "exactIn",
-      receiveAddress: "0x0123",
-      walletAddress: "0xwallet",
-    },
-    status: "CREATED",
-    atomiqSwapId: "swap-1",
-    quote: { amountIn: "10000" },
-    expiresAt: now.toISOString(),
-    rawState: { state: "PR_CREATED" },
+    network: "testnet",
+    sourceAsset: "BTC",
+    destinationAsset: "USDC",
+    amount: "10000",
+    amountType: "exactIn",
+    receiveAddress: "0x0123",
+    walletAddress: "0xwallet",
+    action: "swap",
   });
 
   assert.equal(order.network, "testnet");
-  assert.equal(order.atomiqSwapId, "swap-1");
   assert.equal(order.status, "CREATED");
-  assert.equal(order.expiresAt, now.toISOString());
+  assert.equal(order.action, "swap");
+  assert.equal(order.atomiqSwapId, null);
+  assert.equal(order.sourceAsset, "BTC");
 });

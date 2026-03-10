@@ -1,32 +1,25 @@
 import { Request, Response, Router } from "express";
 import { log } from "../lib/logger.js";
-import { AtomiqSdkClient } from "../lib/bridge/atomiqClient.js";
 import { BridgeService } from "../lib/bridge/bridgeService.js";
 import { PgBridgeRepository } from "../lib/bridge/repository.js";
-import { settings } from "../lib/settings.js";
 import {
   normalizeWalletAddress,
   validateCreateOrderPayload,
   validatePositiveIntegerString,
+  validateStatus,
 } from "../lib/bridge/validation.js";
 
-let bridgeServicePromise: Promise<BridgeService> | null = null;
+let servicePromise: Promise<BridgeService> | null = null;
 
-async function getBridgeService(): Promise<BridgeService> {
-  if (bridgeServicePromise) {
-    return bridgeServicePromise;
-  }
-
-  bridgeServicePromise = (async () => {
+async function getService(): Promise<BridgeService> {
+  if (servicePromise) return servicePromise;
+  servicePromise = (async () => {
     const repository = PgBridgeRepository.fromSettings();
-    const atomiqClient = new AtomiqSdkClient();
-    const service = new BridgeService(repository, atomiqClient);
+    const service = new BridgeService(repository);
     await service.init();
-    service.startRecoveryPoller(settings.bridge_recovery_interval_ms);
     return service;
   })();
-
-  return bridgeServicePromise;
+  return servicePromise;
 }
 
 function isBadRequestMessage(message: string): boolean {
@@ -35,7 +28,7 @@ function isBadRequestMessage(message: string): boolean {
     message.includes("must be") ||
     message.includes("unsupported") ||
     message.includes("positive integer") ||
-    message.includes("expired")
+    message.includes("Cannot transition")
   );
 }
 
@@ -47,130 +40,108 @@ function handleRouteError(res: Response, error: unknown): Response {
   if (isBadRequestMessage(message)) {
     return res.status(400).json({ error: message });
   }
-  return res.status(502).json({ error: message });
+  return res.status(500).json({ error: message });
 }
 
-type BridgeServiceLike = Pick<
-  BridgeService,
-  "createOrder" | "getOrder" | "listOrders" | "retryOrder" | "submitPsbt"
->;
+const router = Router();
 
-export function createBridgeRouter(serviceResolver: () => Promise<BridgeServiceLike>): Router {
-  const router = Router();
-
-  router.post("/orders", async (req: Request, res: Response) => {
-    log.info("bridge route POST /orders", {
-      network: (req.body as Record<string, unknown>)?.network,
-      destinationAsset: (req.body as Record<string, unknown>)?.destinationAsset,
-      amount: (req.body as Record<string, unknown>)?.amount,
-      amountType: (req.body as Record<string, unknown>)?.amountType,
+// Create a new tracking order
+router.post("/orders", async (req: Request, res: Response) => {
+  log.info("bridge POST /orders", {
+    destinationAsset: (req.body as Record<string, unknown>)?.destinationAsset,
+    amount: (req.body as Record<string, unknown>)?.amount,
+    action: (req.body as Record<string, unknown>)?.action,
+  });
+  try {
+    const payload = validateCreateOrderPayload(req.body);
+    const service = await getService();
+    const order = await service.createOrder(payload);
+    return res.status(201).json({
+      data: {
+        orderId: order.id,
+        status: order.status,
+        createdAt: order.createdAt,
+      },
     });
-    try {
-      const payload = validateCreateOrderPayload(req.body);
-      const service = await serviceResolver();
-      const order = await service.createOrder(payload);
-      const quote = order.quote ?? {};
-      const quoteBitcoinPayment =
-        quote && typeof quote === "object" && !Array.isArray(quote)
-          ? ((quote as Record<string, unknown>).bitcoinPayment ?? null)
-          : null;
-      const paymentAmountSats =
-        quoteBitcoinPayment &&
-        typeof quoteBitcoinPayment === "object" &&
-        (quoteBitcoinPayment as Record<string, unknown>).type === "ADDRESS" &&
-        typeof (quoteBitcoinPayment as Record<string, unknown>).amountSats === "string"
-          ? ((quoteBitcoinPayment as Record<string, unknown>).amountSats as string)
-          : null;
-      const quoteAmountIn = typeof quote.amountIn === "string" ? quote.amountIn : null;
-      const quoteAmountInBaseUnits = quoteAmountIn && !quoteAmountIn.includes(".") ? quoteAmountIn : null;
-      return res.status(201).json({
-        data: {
-          orderId: order.id,
-          status: order.status,
-          depositAddress: order.depositAddress ?? (quote.depositAddress ?? null),
-          amountSats: order.sourceAsset === "BTC" ? (paymentAmountSats ?? order.amount) : quoteAmountInBaseUnits,
-          payment: quoteBitcoinPayment,
-          quote: order.quote,
-          expiresAt: order.expiresAt,
-        },
-      });
-    } catch (error: unknown) {
-      return handleRouteError(res, error);
-    }
-  });
+  } catch (error: unknown) {
+    return handleRouteError(res, error);
+  }
+});
 
-  router.get("/orders/:id", async (req: Request, res: Response) => {
-    log.info("bridge route GET /orders/:id", { orderId: req.params.id });
-    try {
-      const orderId = req.params.id?.trim();
-      if (!orderId) {
-        return res.status(400).json({ error: "order id is required" });
-      }
-      const service = await serviceResolver();
-      const order = await service.getOrder(orderId);
-      return res.json({ data: order });
-    } catch (error: unknown) {
-      return handleRouteError(res, error);
-    }
-  });
+// Get order by ID
+router.get("/orders/:id", async (req: Request, res: Response) => {
+  try {
+    const orderId = req.params.id?.trim();
+    if (!orderId) return res.status(400).json({ error: "order id is required" });
+    const service = await getService();
+    const order = await service.getOrder(orderId);
+    return res.json({ data: order });
+  } catch (error: unknown) {
+    return handleRouteError(res, error);
+  }
+});
 
-  router.get("/orders", async (req: Request, res: Response) => {
-    log.info("bridge route GET /orders", {
-      walletAddress: req.query.walletAddress,
-      page: req.query.page,
-      limit: req.query.limit,
+// List orders by wallet address
+router.get("/orders", async (req: Request, res: Response) => {
+  try {
+    const walletAddress = normalizeWalletAddress(String(req.query.walletAddress ?? ""));
+    if (!walletAddress) return res.status(400).json({ error: "walletAddress query parameter is required" });
+    const page = validatePositiveIntegerString(req.query.page ?? "1", "page");
+    const limit = validatePositiveIntegerString(req.query.limit ?? "20", "limit");
+    const service = await getService();
+    const result = await service.listOrders(walletAddress, page, limit);
+    return res.json(result);
+  } catch (error: unknown) {
+    return handleRouteError(res, error);
+  }
+});
+
+// Link atomiq swap ID to order (frontend reports after creating swap)
+router.patch("/orders/:id/atomiq-swap-id", async (req: Request, res: Response) => {
+  try {
+    const orderId = req.params.id?.trim();
+    if (!orderId) return res.status(400).json({ error: "order id is required" });
+    const atomiqSwapId = String((req.body as Record<string, unknown>)?.atomiqSwapId ?? "").trim();
+    if (!atomiqSwapId) return res.status(400).json({ error: "atomiqSwapId is required" });
+    const service = await getService();
+    const order = await service.linkAtomiqSwapId(orderId, atomiqSwapId);
+    return res.json({ data: order });
+  } catch (error: unknown) {
+    return handleRouteError(res, error);
+  }
+});
+
+// Link BTC transaction hash to order (frontend reports after sending BTC)
+router.patch("/orders/:id/btc-tx", async (req: Request, res: Response) => {
+  try {
+    const orderId = req.params.id?.trim();
+    if (!orderId) return res.status(400).json({ error: "order id is required" });
+    const btcTxHash = String((req.body as Record<string, unknown>)?.btcTxHash ?? "").trim();
+    if (!btcTxHash) return res.status(400).json({ error: "btcTxHash is required" });
+    const service = await getService();
+    const order = await service.linkBtcTxHash(orderId, btcTxHash);
+    return res.json({ data: order });
+  } catch (error: unknown) {
+    return handleRouteError(res, error);
+  }
+});
+
+// Update order status (frontend reports milestones)
+router.patch("/orders/:id/status", async (req: Request, res: Response) => {
+  try {
+    const orderId = req.params.id?.trim();
+    if (!orderId) return res.status(400).json({ error: "order id is required" });
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const status = validateStatus(body.status);
+    const service = await getService();
+    const order = await service.updateStatus(orderId, status, {
+      destinationTxId: body.destinationTxId ? String(body.destinationTxId) : undefined,
+      lastError: body.lastError ? String(body.lastError) : undefined,
     });
-    try {
-      const walletAddress = normalizeWalletAddress(String(req.query.walletAddress ?? ""));
-      if (!walletAddress) {
-        return res.status(400).json({ error: "walletAddress query parameter is required" });
-      }
-      const page = validatePositiveIntegerString(req.query.page ?? "1", "page");
-      const limit = validatePositiveIntegerString(req.query.limit ?? "20", "limit");
+    return res.json({ data: order });
+  } catch (error: unknown) {
+    return handleRouteError(res, error);
+  }
+});
 
-      const service = await serviceResolver();
-      const result = await service.listOrders(walletAddress, page, limit);
-      return res.json(result);
-    } catch (error: unknown) {
-      return handleRouteError(res, error);
-    }
-  });
-
-  router.post("/orders/:id/retry", async (req: Request, res: Response) => {
-    log.info("bridge route POST /orders/:id/retry", { orderId: req.params.id });
-    try {
-      const orderId = req.params.id?.trim();
-      if (!orderId) {
-        return res.status(400).json({ error: "order id is required" });
-      }
-      const service = await serviceResolver();
-      const order = await service.retryOrder(orderId);
-      return res.json({ data: order });
-    } catch (error: unknown) {
-      return handleRouteError(res, error);
-    }
-  });
-
-  router.post("/orders/:id/submit-psbt", async (req: Request, res: Response) => {
-    log.info("bridge route POST /orders/:id/submit-psbt", { orderId: req.params.id });
-    try {
-      const orderId = req.params.id?.trim();
-      if (!orderId) {
-        return res.status(400).json({ error: "order id is required" });
-      }
-      const signedPsbt = String((req.body as Record<string, unknown>)?.signedPsbt ?? "").trim();
-      if (!signedPsbt) {
-        return res.status(400).json({ error: "signedPsbt is required" });
-      }
-      const service = await serviceResolver();
-      const txId = await service.submitPsbt(orderId, signedPsbt);
-      return res.json({ data: { txId } });
-    } catch (error: unknown) {
-      return handleRouteError(res, error);
-    }
-  });
-
-  return router;
-}
-
-export default createBridgeRouter(getBridgeService);
+export default router;

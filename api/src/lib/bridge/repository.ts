@@ -3,8 +3,6 @@ import { randomUUID } from "node:crypto";
 import { settings } from "../settings.js";
 import { log } from "../logger.js";
 import {
-  BridgeActionStatus,
-  BridgeActionType,
   BridgeCreateOrderInput,
   BridgeOrder,
   BridgeOrderPage,
@@ -24,62 +22,33 @@ type BridgeOrderRow = {
   receive_address: string;
   wallet_address: string;
   status: string;
+  action: string;
   atomiq_swap_id: string | null;
   source_tx_id: string | null;
   destination_tx_id: string | null;
-  quote_json: Record<string, unknown> | null;
-  expires_at: Date | null;
   last_error: string | null;
-  raw_state_json: Record<string, unknown> | null;
   created_at: Date;
   updated_at: Date;
 };
 
-export type CreateBridgeOrderArgs = {
-  input: BridgeCreateOrderInput;
-  status: BridgeOrderStatus;
-  atomiqSwapId?: string | null;
-  quote?: Record<string, unknown> | null;
-  expiresAt?: string | null;
-  rawState?: Record<string, unknown> | null;
-  amountSource?: string | null;
-  amountDestination?: string | null;
-  depositAddress?: string | null;
-};
-
 export type BridgeRepository = {
   init(): Promise<void>;
-  createOrder(args: CreateBridgeOrderArgs): Promise<BridgeOrder>;
+  createOrder(input: BridgeCreateOrderInput): Promise<BridgeOrder>;
   getOrderById(id: string): Promise<BridgeOrder | null>;
   listOrdersByWallet(walletAddress: string, page: number, limit: number): Promise<BridgeOrderPage>;
   updateOrder(
     id: string,
     patch: Partial<{
       status: BridgeOrderStatus;
+      atomiqSwapId: string | null;
       sourceTxId: string | null;
       destinationTxId: string | null;
       lastError: string | null;
-      rawState: Record<string, unknown> | null;
-      quote: Record<string, unknown> | null;
-      atomiqSwapId: string | null;
-      expiresAt: string | null;
+      amountSource: string | null;
+      amountDestination: string | null;
       depositAddress: string | null;
     }>
   ): Promise<BridgeOrder>;
-  addAction(
-    orderId: string,
-    type: BridgeActionType,
-    status: BridgeActionStatus,
-    payload?: Record<string, unknown>
-  ): Promise<void>;
-  addEvent(
-    orderId: string,
-    type: string,
-    fromStatus: BridgeOrderStatus | null,
-    toStatus: BridgeOrderStatus | null,
-    payload?: Record<string, unknown>
-  ): Promise<void>;
-  getActiveOrders(limit?: number): Promise<BridgeOrder[]>;
 };
 
 function toOrder(row: BridgeOrderRow): BridgeOrder {
@@ -96,13 +65,11 @@ function toOrder(row: BridgeOrderRow): BridgeOrder {
     receiveAddress: row.receive_address,
     walletAddress: row.wallet_address,
     status: row.status as BridgeOrderStatus,
+    action: (row.action ?? "swap") as BridgeOrder["action"],
     atomiqSwapId: row.atomiq_swap_id,
     sourceTxId: row.source_tx_id,
     destinationTxId: row.destination_tx_id,
-    quote: row.quote_json,
-    expiresAt: row.expires_at?.toISOString() ?? null,
     lastError: row.last_error,
-    rawState: row.raw_state_json,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -124,38 +91,31 @@ export class PgBridgeRepository implements BridgeRepository {
   }
 
   async init(): Promise<void> {
-    // Tables are created by migrations at server startup (see src/db/migrate.ts)
-    console.log("[bridge] Repository initialized");
+    log.info("bridge repository initialized");
   }
 
-  async createOrder(args: CreateBridgeOrderArgs): Promise<BridgeOrder> {
+  async createOrder(input: BridgeCreateOrderInput): Promise<BridgeOrder> {
     const id = randomUUID();
     const result = await this.pool.query<BridgeOrderRow>(
       `
       INSERT INTO bridge_orders (
-        id, network, source_asset, destination_asset, amount, amount_type, amount_source, amount_destination,
-        deposit_address, receive_address, wallet_address, status, atomiq_swap_id, quote_json, expires_at, raw_state_json
+        id, network, source_asset, destination_asset, amount, amount_type,
+        receive_address, wallet_address, status, action
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
       RETURNING *
       `,
       [
         id,
-        args.input.network,
-        args.input.sourceAsset,
-        args.input.destinationAsset,
-        args.input.amount,
-        args.input.amountType,
-        args.amountSource ?? null,
-        args.amountDestination ?? null,
-        args.depositAddress ?? null,
-        args.input.receiveAddress,
-        args.input.walletAddress,
-        args.status,
-        args.atomiqSwapId ?? null,
-        args.quote ?? null,
-        args.expiresAt ?? null,
-        args.rawState ?? null,
+        input.network,
+        input.sourceAsset,
+        input.destinationAsset,
+        input.amount,
+        input.amountType,
+        input.receiveAddress,
+        input.walletAddress,
+        "CREATED",
+        input.action,
       ]
     );
     return toOrder(result.rows[0]);
@@ -198,13 +158,12 @@ export class PgBridgeRepository implements BridgeRepository {
     id: string,
     patch: Partial<{
       status: BridgeOrderStatus;
+      atomiqSwapId: string | null;
       sourceTxId: string | null;
       destinationTxId: string | null;
       lastError: string | null;
-      rawState: Record<string, unknown> | null;
-      quote: Record<string, unknown> | null;
-      atomiqSwapId: string | null;
-      expiresAt: string | null;
+      amountSource: string | null;
+      amountDestination: string | null;
       depositAddress: string | null;
     }>
   ): Promise<BridgeOrder> {
@@ -215,13 +174,12 @@ export class PgBridgeRepository implements BridgeRepository {
 
     const next = {
       status: patch.status ?? current.status,
+      atomiqSwapId: patch.atomiqSwapId ?? current.atomiqSwapId,
       sourceTxId: patch.sourceTxId ?? current.sourceTxId,
       destinationTxId: patch.destinationTxId ?? current.destinationTxId,
       lastError: patch.lastError ?? current.lastError,
-      rawState: patch.rawState ?? current.rawState,
-      quote: patch.quote ?? current.quote,
-      atomiqSwapId: patch.atomiqSwapId ?? current.atomiqSwapId,
-      expiresAt: patch.expiresAt ?? current.expiresAt,
+      amountSource: patch.amountSource ?? current.amountSource,
+      amountDestination: patch.amountDestination ?? current.amountDestination,
       depositAddress: patch.depositAddress ?? current.depositAddress,
     };
 
@@ -230,14 +188,13 @@ export class PgBridgeRepository implements BridgeRepository {
       UPDATE bridge_orders
       SET
         status = $2,
-        source_tx_id = $3,
-        destination_tx_id = $4,
-        last_error = $5,
-        raw_state_json = $6,
-        quote_json = $7,
-        atomiq_swap_id = $8,
-        expires_at = $9,
-        deposit_address = $10,
+        atomiq_swap_id = $3,
+        source_tx_id = $4,
+        destination_tx_id = $5,
+        last_error = $6,
+        amount_source = $7,
+        amount_destination = $8,
+        deposit_address = $9,
         updated_at = NOW()
       WHERE id = $1
       RETURNING *
@@ -245,55 +202,16 @@ export class PgBridgeRepository implements BridgeRepository {
       [
         id,
         next.status,
+        next.atomiqSwapId,
         next.sourceTxId,
         next.destinationTxId,
         next.lastError,
-        next.rawState,
-        next.quote,
-        next.atomiqSwapId,
-        next.expiresAt,
+        next.amountSource,
+        next.amountDestination,
         next.depositAddress,
       ]
     );
 
     return toOrder(result.rows[0]);
-  }
-
-  async addAction(
-    orderId: string,
-    type: BridgeActionType,
-    status: BridgeActionStatus,
-    payload?: Record<string, unknown>
-  ): Promise<void> {
-    await this.pool.query(
-      "INSERT INTO bridge_actions(order_id, action_type, action_status, payload_json) VALUES ($1, $2, $3, $4)",
-      [orderId, type, status, payload ?? null]
-    );
-  }
-
-  async addEvent(
-    orderId: string,
-    type: string,
-    fromStatus: BridgeOrderStatus | null,
-    toStatus: BridgeOrderStatus | null,
-    payload?: Record<string, unknown>
-  ): Promise<void> {
-    await this.pool.query(
-      "INSERT INTO bridge_events(order_id, event_type, from_status, to_status, payload_json) VALUES ($1, $2, $3, $4, $5)",
-      [orderId, type, fromStatus, toStatus, payload ?? null]
-    );
-  }
-
-  async getActiveOrders(limit = 50): Promise<BridgeOrder[]> {
-    const result = await this.pool.query<BridgeOrderRow>(
-      `
-      SELECT * FROM bridge_orders
-      WHERE status IN ('CREATED', 'AWAITING_USER_SIGNATURE', 'SOURCE_SUBMITTED', 'SOURCE_CONFIRMED', 'CLAIMING', 'REFUNDING')
-      ORDER BY updated_at ASC
-      LIMIT $1
-      `,
-      [limit]
-    );
-    return result.rows.map(toOrder);
   }
 }

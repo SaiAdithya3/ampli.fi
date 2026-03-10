@@ -1,8 +1,14 @@
 import { validateAndParseAddress } from "starknet";
 import { asString } from "../aggregatorUtils.js";
 import { settings } from "../settings.js";
-import { BridgeAmountType, BridgeCreateOrderInput } from "./types.js";
+import { BridgeAmountType, BridgeCreateOrderInput, BridgeOrderAction, BridgeOrderStatus } from "./types.js";
+
 const SUPPORTED_DESTINATION_ASSETS = new Set(["USDC", "ETH", "STRK", "WBTC", "USDT", "TBTC"]);
+
+const VALID_STATUSES: Set<string> = new Set([
+  "CREATED", "SWAP_CREATED", "BTC_SENT", "BTC_CONFIRMED",
+  "CLAIMING", "SETTLED", "FAILED", "EXPIRED", "REFUNDED",
+]);
 
 export function normalizeWalletAddress(value: string): string {
   return value.trim().toLowerCase();
@@ -22,20 +28,6 @@ export function validatePositiveIntegerString(value: unknown, field: string): st
     throw new Error(`${field} must be a positive integer string`);
   }
   if (BigInt(normalized) <= 0n) {
-    throw new Error(`${field} must be greater than zero`);
-  }
-  return normalized;
-}
-
-export function validateTokenAmount(value: unknown, field: string): string {
-  const normalized = asString(value).trim();
-  if (!normalized) {
-    throw new Error(`${field} is required`);
-  }
-  if (!/^\d+(\.\d+)?$/.test(normalized)) {
-    throw new Error(`${field} must be a valid token amount (e.g. "0.001" or "100")`);
-  }
-  if (/^0(\.0*)?$/.test(normalized)) {
     throw new Error(`${field} must be greater than zero`);
   }
   return normalized;
@@ -63,29 +55,20 @@ export function validateStarknetReceiveAddress(value: unknown): string {
   }
 }
 
-export function validateBitcoinAddress(value: unknown): string {
+export function validateAction(value: unknown): BridgeOrderAction {
   const normalized = asString(value).trim();
-  if (!normalized) {
-    throw new Error("bitcoinPaymentAddress is required");
-  }
-  if (!/^(bc1|tb1|[13]|[mn2])[a-zA-Z0-9]{20,}$/i.test(normalized)) {
-    throw new Error("bitcoinPaymentAddress must be a valid Bitcoin address");
+  if (normalized !== "swap" && normalized !== "borrow") {
+    throw new Error("action must be one of: swap, borrow");
   }
   return normalized;
 }
 
-export function validateBitcoinPublicKey(value: unknown): string {
+export function validateStatus(value: unknown): BridgeOrderStatus {
   const normalized = asString(value).trim();
-  if (!normalized) {
-    throw new Error("bitcoinPublicKey is required");
+  if (!VALID_STATUSES.has(normalized)) {
+    throw new Error(`status must be one of: ${[...VALID_STATUSES].join(", ")}`);
   }
-  if (!/^[0-9a-fA-F]+$/.test(normalized)) {
-    throw new Error("bitcoinPublicKey must be a hex string");
-  }
-  if (normalized.length !== 66 && normalized.length !== 130) {
-    throw new Error("bitcoinPublicKey must be a 33-byte or 65-byte hex public key");
-  }
-  return normalized;
+  return normalized as BridgeOrderStatus;
 }
 
 export function validateCreateOrderPayload(payload: unknown): BridgeCreateOrderInput {
@@ -100,19 +83,6 @@ export function validateCreateOrderPayload(payload: unknown): BridgeCreateOrderI
     throw new Error("walletAddress is required");
   }
 
-  const hasBitcoinPaymentAddress = body.bitcoinPaymentAddress != null;
-  const hasBitcoinPublicKey = body.bitcoinPublicKey != null;
-  if (hasBitcoinPaymentAddress !== hasBitcoinPublicKey) {
-    throw new Error("bitcoinPaymentAddress and bitcoinPublicKey must be provided together");
-  }
-
-  const bitcoinPaymentAddress = hasBitcoinPaymentAddress
-    ? validateBitcoinAddress(body.bitcoinPaymentAddress)
-    : undefined;
-  const bitcoinPublicKey = hasBitcoinPublicKey
-    ? validateBitcoinPublicKey(body.bitcoinPublicKey)
-    : undefined;
-
   return {
     network: settings.network,
     sourceAsset: "BTC",
@@ -121,7 +91,6 @@ export function validateCreateOrderPayload(payload: unknown): BridgeCreateOrderI
     amountType: validateAmountType(body.amountType),
     receiveAddress: validateStarknetReceiveAddress(body.receiveAddress),
     walletAddress,
-    bitcoinPaymentAddress,
-    bitcoinPublicKey,
+    action: body.action ? validateAction(body.action) : "swap",
   };
 }

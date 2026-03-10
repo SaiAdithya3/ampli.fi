@@ -1,1 +1,2 @@
-export { LoanStatusPanel, type LoanFlowState } from "./LoanStatusPanel";
+export { LoanStatusPanel } from "./LoanStatusPanel";
+export type { LoanStatusPanelProps } from "./LoanStatusPanel";

@@ -2,28 +2,18 @@ export type BridgeNetwork = "mainnet" | "testnet";
 
 export type BridgeOrderStatus =
   | "CREATED"
-  | "AWAITING_USER_SIGNATURE"
-  | "SOURCE_SUBMITTED"
-  | "SOURCE_CONFIRMED"
-  | "SETTLED"
+  | "SWAP_CREATED"
+  | "BTC_SENT"
+  | "BTC_CONFIRMED"
   | "CLAIMING"
-  | "REFUNDING"
-  | "REFUNDED"
+  | "SETTLED"
   | "FAILED"
-  | "EXPIRED";
+  | "EXPIRED"
+  | "REFUNDED";
 
 export type BridgeAmountType = "exactIn" | "exactOut";
 
-export type BridgeActionType =
-  | "CREATE_ORDER"
-  | "PREPARE_ORDER"
-  | "SUBMIT_ORDER"
-  | "POLL_ORDER"
-  | "AUTO_CLAIM"
-  | "AUTO_REFUND"
-  | "MANUAL_RETRY";
-
-export type BridgeActionStatus = "SUCCESS" | "FAILED";
+export type BridgeOrderAction = "swap" | "borrow";
 
 export type BridgeCreateOrderInput = {
   network: BridgeNetwork;
@@ -33,8 +23,7 @@ export type BridgeCreateOrderInput = {
   amountType: BridgeAmountType;
   receiveAddress: string;
   walletAddress: string;
-  bitcoinPaymentAddress?: string;
-  bitcoinPublicKey?: string;
+  action: BridgeOrderAction;
 };
 
 export type BridgeOrder = {
@@ -50,13 +39,11 @@ export type BridgeOrder = {
   receiveAddress: string;
   walletAddress: string;
   status: BridgeOrderStatus;
+  action: BridgeOrderAction;
   atomiqSwapId: string | null;
   sourceTxId: string | null;
   destinationTxId: string | null;
-  quote: Record<string, unknown> | null;
-  expiresAt: string | null;
   lastError: string | null;
-  rawState: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
 };

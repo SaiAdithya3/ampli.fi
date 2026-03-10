@@ -1,9 +1,6 @@
 import { log } from "../logger.js";
-import { runWithTraceAsync } from "../trace.js";
-import { AtomiqClient } from "./atomiqClient.js";
 import { BridgeRepository } from "./repository.js";
-import { mapAtomiqStateToOrderStatus } from "./stateMapper.js";
-import { BridgeCreateOrderInput, BridgeOrder, BridgeOrderPage } from "./types.js";
+import { BridgeCreateOrderInput, BridgeOrder, BridgeOrderPage, BridgeOrderStatus } from "./types.js";
 
 const MAX_LIST_LIMIT = 100;
 
@@ -20,79 +17,34 @@ function validatePagination(pageRaw: unknown, limitRaw: unknown): { page: number
   return { page, limit: Math.min(limit, MAX_LIST_LIMIT) };
 }
 
-export class BridgeService {
-  private poller: NodeJS.Timeout | null = null;
+const VALID_STATUS_TRANSITIONS: Record<string, BridgeOrderStatus[]> = {
+  CREATED: ["SWAP_CREATED", "FAILED", "EXPIRED"],
+  SWAP_CREATED: ["BTC_SENT", "FAILED", "EXPIRED"],
+  BTC_SENT: ["BTC_CONFIRMED", "FAILED"],
+  BTC_CONFIRMED: ["CLAIMING", "SETTLED", "FAILED"],
+  CLAIMING: ["SETTLED", "FAILED"],
+  SETTLED: [],
+  FAILED: [],
+  EXPIRED: [],
+  REFUNDED: [],
+};
 
-  constructor(
-    private readonly repository: BridgeRepository,
-    private readonly atomiqClient: AtomiqClient
-  ) {}
+export class BridgeService {
+  constructor(private readonly repository: BridgeRepository) {}
 
   async init(): Promise<void> {
     await this.repository.init();
   }
 
-  startRecoveryPoller(intervalMs = 30000): void {
-    if (this.poller) return;
-    this.poller = setInterval(() => {
-      const traceId = `recovery-${Date.now()}`;
-      runWithTraceAsync(traceId, () =>
-        this.reconcileActiveOrders().catch((error: unknown) => {
-          const msg = error instanceof Error ? error.message : String(error);
-          log.error("bridge recovery poller error", { error: msg });
-        })
-      );
-    }, intervalMs);
-  }
-
-  stopRecoveryPoller(): void {
-    if (this.poller) {
-      clearInterval(this.poller);
-      this.poller = null;
-    }
-  }
-
   async createOrder(input: BridgeCreateOrderInput): Promise<BridgeOrder> {
-    log.info("bridge createOrder start", {
+    log.info("bridge createOrder", {
       network: input.network,
       destinationAsset: input.destinationAsset,
       amount: input.amount,
-      receiveAddress: input.receiveAddress,
+      action: input.action,
     });
-    const swap = await this.atomiqClient.createIncomingSwap({
-      network: input.network,
-      destinationAsset: input.destinationAsset,
-      amount: input.amount,
-      amountType: input.amountType,
-      receiveAddress: input.receiveAddress,
-      bitcoinPaymentAddress: input.bitcoinPaymentAddress,
-      bitcoinPublicKey: input.bitcoinPublicKey,
-    });
-
-    const order = await this.repository.createOrder({
-      input,
-      status: "CREATED",
-      atomiqSwapId: swap.atomiqSwapId,
-      quote: swap.quote,
-      expiresAt: swap.expiresAt,
-      rawState: { state: String(swap.statusRaw ?? "") },
-      amountSource: swap.amountSource,
-      amountDestination: swap.amountDestination,
-      depositAddress: swap.depositAddress,
-    });
-
-    await this.repository.addAction(order.id, "CREATE_ORDER", "SUCCESS", {
-      atomiqSwapId: order.atomiqSwapId,
-    });
-    await this.repository.addEvent(order.id, "ORDER_CREATED", null, "CREATED", {
-      quote: order.quote,
-      expiresAt: order.expiresAt,
-    });
-    log.info("bridge createOrder success", {
-      orderId: order.id,
-      atomiqSwapId: order.atomiqSwapId,
-      status: order.status,
-    });
+    const order = await this.repository.createOrder(input);
+    log.info("bridge createOrder success", { orderId: order.id });
     return order;
   }
 
@@ -105,92 +57,42 @@ export class BridgeService {
     return this.repository.listOrdersByWallet(walletAddress.toLowerCase(), page, limit);
   }
 
-  async retryOrder(orderId: string): Promise<BridgeOrder> {
-    log.info("bridge retryOrder start", { orderId });
+  async linkAtomiqSwapId(orderId: string, atomiqSwapId: string): Promise<BridgeOrder> {
     const order = await this.requireOrder(orderId);
-    await this.repository.addAction(order.id, "MANUAL_RETRY", "SUCCESS");
-    const result = await this.reconcileOrder(order.id);
-    log.info("bridge retryOrder success", { orderId, status: result.status });
-    return result;
-  }
-
-  async submitPsbt(orderId: string, signedPsbt: string): Promise<string> {
-    const order = await this.requireOrder(orderId);
-    return this.atomiqClient.submitPsbt(order, signedPsbt);
-  }
-
-  async reconcileActiveOrders(): Promise<void> {
-    const activeOrders = await this.repository.getActiveOrders(100);
-    log.info("bridge reconcileActiveOrders start", { count: activeOrders.length });
-    for (const order of activeOrders) {
-      await this.reconcileOrder(order.id);
-    }
-    log.info("bridge reconcileActiveOrders done", { count: activeOrders.length });
-  }
-
-  async reconcileOrder(orderId: string): Promise<BridgeOrder> {
-    const order = await this.requireOrder(orderId);
-    const snapshot = await this.atomiqClient.getOrderSnapshot(order);
-    log.info("bridge reconcileOrder snapshot", {
-      orderId,
-      statusRaw: String(snapshot.statusRaw ?? ""),
-      isClaimable: snapshot.isClaimable,
-      isRefundable: snapshot.isRefundable,
+    log.info("bridge linkAtomiqSwapId", { orderId, atomiqSwapId });
+    return this.repository.updateOrder(order.id, {
+      atomiqSwapId,
+      status: "SWAP_CREATED",
     });
+  }
 
-    let nextStatus = mapAtomiqStateToOrderStatus(snapshot.statusRaw);
-    let destinationTxId = snapshot.destinationTxId;
-    let lastError: string | null = null;
+  async linkBtcTxHash(orderId: string, btcTxHash: string): Promise<BridgeOrder> {
+    const order = await this.requireOrder(orderId);
+    log.info("bridge linkBtcTxHash", { orderId, btcTxHash });
+    return this.repository.updateOrder(order.id, {
+      sourceTxId: btcTxHash,
+      status: "BTC_SENT",
+    });
+  }
 
-    if (snapshot.isClaimable) {
-      const claim = await this.atomiqClient.tryClaim(order);
-      await this.repository.addAction(order.id, "AUTO_CLAIM", claim.success ? "SUCCESS" : "FAILED", {
-        txId: claim.txId ?? null,
-      });
-      if (claim.success) {
-        nextStatus = "SETTLED";
-        destinationTxId = claim.txId ?? destinationTxId;
-      } else {
-        nextStatus = "CLAIMING";
-      }
-    } else if (snapshot.isRefundable) {
-      const refund = await this.atomiqClient.tryRefund(order);
-      await this.repository.addAction(order.id, "AUTO_REFUND", refund.success ? "SUCCESS" : "FAILED", {
-        txId: refund.txId ?? null,
-      });
-      if (refund.success) {
-        nextStatus = "REFUNDED";
-        destinationTxId = refund.txId ?? destinationTxId;
-      } else {
-        nextStatus = "REFUNDING";
-      }
+  async updateStatus(
+    orderId: string,
+    status: BridgeOrderStatus,
+    payload?: { destinationTxId?: string; lastError?: string }
+  ): Promise<BridgeOrder> {
+    const order = await this.requireOrder(orderId);
+
+    const allowed = VALID_STATUS_TRANSITIONS[order.status];
+    if (allowed && !allowed.includes(status)) {
+      throw new Error(`Cannot transition from ${order.status} to ${status}`);
     }
 
-    const updated = await this.repository.updateOrder(order.id, {
-      status: nextStatus,
-      sourceTxId: snapshot.sourceTxId ?? order.sourceTxId,
-      destinationTxId,
-      rawState: snapshot.rawState,
-      lastError,
+    log.info("bridge updateStatus", { orderId, from: order.status, to: status });
+    return this.repository.updateOrder(order.id, {
+      status,
+      destinationTxId: payload?.destinationTxId ?? null,
+      lastError: payload?.lastError ?? null,
     });
-    await this.repository.addAction(order.id, "POLL_ORDER", "SUCCESS", {
-      statusRaw: String(snapshot.statusRaw ?? ""),
-      mappedStatus: nextStatus,
-      sourceTxId: snapshot.sourceTxId,
-      destinationTxId,
-    });
-    await this.repository.addEvent(order.id, "ORDER_RECONCILED", order.status, updated.status, {
-      statusRaw: String(snapshot.statusRaw ?? ""),
-      sourceTxId: snapshot.sourceTxId,
-      destinationTxId,
-    });
-    log.info("bridge reconcileOrder success", {
-      orderId: order.id,
-      fromStatus: order.status,
-      toStatus: updated.status,
-      destinationTxId,
-    });
-    return updated;
   }
 
   private async requireOrder(orderId: string): Promise<BridgeOrder> {

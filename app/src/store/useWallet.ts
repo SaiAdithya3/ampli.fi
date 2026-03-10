@@ -270,6 +270,9 @@ export const useWallet = create<WalletState>()(
         if (state.bitcoinWalletType && !state.bitcoinWalletInstance) {
           state.connectBitcoin(state.bitcoinWalletType).catch(() => {});
         }
+        if (state.starknetAddress && !state.starknetSigner && state.starknetSource === "extension") {
+          state.tryRestoreStarknetAccount().catch(() => {});
+        }
       },
     }
   )

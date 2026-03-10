@@ -10,15 +10,12 @@ const SettingsSchema = z
     port: z.number().int().positive(),
     network: z.enum(["mainnet", "testnet"]),
     rpc_url: z.string().min(1, "rpc_url is required"),
-    bridge_rpc_url: z.string().min(1).optional(),
     vesu_api_url: z.string().min(1, "vesu_api_url is required"),
     paymaster_url: z.string().min(1, "paymaster_url is required"),
     paymaster_api_key: z.string(),
     privy_app_id: z.string().min(1, "privy_app_id is required"),
     privy_app_secret: z.string().min(1, "privy_app_secret is required"),
     database_url: z.string().min(1, "database_url is required"),
-    bridge_recovery_interval_ms: z.number().int().positive(),
-    bridge_psbt_skip_taproot_validation: z.boolean().optional(),
   })
   .passthrough();
 

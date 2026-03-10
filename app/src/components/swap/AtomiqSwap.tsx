@@ -1,181 +1,43 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  BitcoinNetwork,
-  FeeType,
-  SwapperFactory,
-  SpvFromBTCSwapState,
-} from "@atomiqlabs/sdk";
-import {
-  RpcProviderWithRetries,
-  StarknetInitializer,
-  StarknetInitializerType,
-} from "@atomiqlabs/chain-starknet";
+import { useState } from "react";
 import { useWallet } from "@/store/useWallet";
-import { ASSET_ICONS, RPC_URL } from "@/lib/constants";
+import { useAtomiqSwap } from "@/hooks/useAtomiqSwap";
+import { ASSET_ICONS } from "@/lib/constants";
+import type { DstToken } from "@/lib/atomiq/swapService";
 import type { BorrowOffer } from "@/types/borrow";
 import borrowOffersData from "@/data/borrowOffers.json";
-
-const factory = new SwapperFactory<[StarknetInitializerType]>([
-  StarknetInitializer,
-]);
-const Tokens = factory.Tokens;
-
-function getStarknetToken(dst: "ETH" | "STRK" | "WBTC") {
-  if (dst === "ETH") return Tokens.STARKNET.ETH;
-  if (dst === "WBTC") return Tokens.STARKNET._TESTNET_WBTC_VESU;
-  return Tokens.STARKNET.STRK;
-}
 
 const borrowOffers = borrowOffersData as BorrowOffer[];
 
 export function AtomiqSwap() {
+  const { connected } = useWallet();
   const {
-    connected,
-    bitcoinPaymentAddress,
-    starknetAddress,
-    bitcoinWalletInstance,
-    starknetSigner,
-  } = useWallet();
+    isInitialized,
+    isInitializing,
+    step,
+    logs,
+    lastSwapId,
+    runSwap,
+    clearLogs,
+  } = useAtomiqSwap();
 
   const [amountBtc, setAmountBtc] = useState("");
-  const [dstToken, setDstToken] = useState<"ETH" | "STRK" | "WBTC">("ETH");
-  const [isInitializing, setIsInitializing] = useState(false);
-  const [isSwapping, setIsSwapping] = useState(false);
-  const [logs, setLogs] = useState<string[]>([]);
-  const [lastSwapId, setLastSwapId] = useState<string | null>(null);
+  const [dstToken, setDstToken] = useState<DstToken>("ETH");
   const [logsOpen, setLogsOpen] = useState(false);
 
-  const btcNetwork = BitcoinNetwork.TESTNET4;
-  const swapper = useMemo(() => {
-    const rpc = new RpcProviderWithRetries({ nodeUrl: RPC_URL });
-    return factory.newSwapper({
-      chains: { STARKNET: { rpcUrl: rpc } },
-      bitcoinNetwork: btcNetwork,
-    });
-  }, [btcNetwork]);
-
-  const log = (line: string) => {
-    setLogs((l) => [...l, line]);
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setIsInitializing(true);
-      try {
-        await swapper.init();
-        if (!cancelled) log("Swapper ready (BTC: Testnet4, Starknet: Sepolia)");
-      } catch (e) {
-        if (!cancelled)
-          log("Init failed: " + (e instanceof Error ? e.message : String(e)));
-      } finally {
-        if (!cancelled) setIsInitializing(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      void swapper.stop();
-    };
-  }, [swapper]);
-
-  const runSwap = async () => {
-    if (
-      !connected ||
-      !bitcoinPaymentAddress ||
-      !starknetAddress ||
-      !bitcoinWalletInstance ||
-      !starknetSigner
-    ) {
-      log("Connect both Bitcoin and Starknet wallets first.");
-      return;
-    }
-    if (!amountBtc || Number(amountBtc) <= 0) {
-      log("Enter a valid amount (BTC).");
-      return;
-    }
-
-    setIsSwapping(true);
-    log("Starting swap…");
-
-    try {
-      const amountSats = BigInt(Math.floor(Number(amountBtc) * 1e8));
-      const token = getStarknetToken(dstToken);
-
-      const swapLimits = swapper.getSwapLimits(Tokens.BITCOIN.BTC, token);
-      log(`Limits: min ${swapLimits.input.min} – max ${swapLimits.input.max} sats`);
-
-      log("Creating quote…");
-      const swap = await swapper.swap(
-        Tokens.BITCOIN.BTC,
-        token,
-        amountSats,
-        true,
-        bitcoinPaymentAddress,
-        starknetAddress,
-        {}
-      );
-
-      const id = swap.getId();
-      setLastSwapId(id);
-      log("Swap created: " + id);
-      log("  Input (no fee): " + swap.getInputWithoutFee().toString() + " sats");
-      log("  Fees: " + swap.getFee().amountInSrcToken.toString() + " sats");
-      for (const fee of swap.getFeeBreakdown()) {
-        log("    - " + FeeType[fee.type] + ": " + fee.fee.amountInSrcToken.toString() + " sats");
-      }
-      log("  Input (with fees): " + swap.getInput().toString() + " sats");
-      log("  Output: " + swap.getOutput().toString());
-
-      swap.events.on("swapState", (updatedSwap) => {
-        const state = updatedSwap.getState();
-        log("State: " + SpvFromBTCSwapState[state]);
-      });
-
-      const btcInstance = bitcoinWalletInstance as unknown as {
-        publicKey?: string;
-        pubkey?: string;
-        getAccounts?: () => unknown;
-        toBitcoinWalletAccounts?: () => unknown;
-      };
-      if (!btcInstance.publicKey && btcInstance.pubkey) {
-        btcInstance.publicKey = btcInstance.pubkey;
-      }
-      if (!btcInstance.getAccounts && btcInstance.toBitcoinWalletAccounts) {
-        btcInstance.getAccounts = () => btcInstance.toBitcoinWalletAccounts!();
-      }
-
-      await swap.sendBitcoinTransaction(bitcoinWalletInstance);
-      log("BTC tx sent. Waiting for confirmation…");
-
-      await swap.waitForBitcoinTransaction(undefined, 1);
-
-      log("BTC confirmed. Waiting for claim…");
-      try {
-        await swap.waitTillClaimedOrFronted(AbortSignal.timeout(30_000));
-        log("Claimed by watchtower.");
-      } catch {
-        log("Claiming manually…");
-        await swap.claim(starknetSigner);
-        log("Claimed manually.");
-      }
-      log("Swap complete.");
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      log("Error: " + msg);
-      console.error("Swap error:", e);
-    } finally {
-      setIsSwapping(false);
-    }
-  };
+  const isSwapping = step !== "idle" && step !== "settled" && step !== "error";
 
   const canSwap =
-    !isInitializing &&
+    isInitialized &&
     connected &&
-    !!bitcoinWalletInstance &&
-    !!starknetSigner &&
     !!amountBtc &&
     Number(amountBtc) > 0 &&
     !isSwapping;
+
+  const handleSwap = () => {
+    runSwap({ dstToken, amountBtc }).catch(() => {
+      // Errors are already logged internally by the hook
+    });
+  };
 
   const btcEquivalent = amountBtc
     ? `≈ ${Number(amountBtc).toFixed(8)} BTC`
@@ -184,7 +46,7 @@ export function AtomiqSwap() {
   return (
     <div className="relative">
       <div className="grid gap-8 lg:grid-cols-[1fr,minmax(320px,400px)]">
-        {/* Left: Swap configuration (Borrow UI style) */}
+        {/* Left: Swap configuration */}
         <div className="space-y-6">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-amplifi-text md:text-3xl">
@@ -274,7 +136,7 @@ export function AtomiqSwap() {
                 />
                 <select
                   value={dstToken}
-                  onChange={(e) => setDstToken(e.target.value as "ETH" | "STRK" | "WBTC")}
+                  onChange={(e) => setDstToken(e.target.value as DstToken)}
                   className="rounded-lg border border-amplifi-border bg-white px-2 py-1.5 text-sm font-medium text-amplifi-text focus:outline-none focus:ring-2 focus:ring-amplifi-primary/30"
                 >
                   <option value="ETH">ETH</option>
@@ -288,11 +150,25 @@ export function AtomiqSwap() {
 
           <button
             type="button"
-            onClick={runSwap}
+            onClick={handleSwap}
             disabled={!canSwap}
             className="w-full rounded-xl bg-amplifi-primary py-3.5 text-base font-semibold text-white transition-opacity disabled:opacity-50"
           >
-            {isSwapping ? "Swapping…" : isInitializing ? "Initializing…" : "Swap"}
+            {isSwapping
+              ? step === "creating_order"
+                ? "Creating order..."
+                : step === "creating_swap"
+                  ? "Creating swap..."
+                  : step === "sending_btc"
+                    ? "Sending BTC..."
+                    : step === "confirming_btc"
+                      ? "Confirming BTC..."
+                      : step === "claiming"
+                        ? "Claiming..."
+                        : "Swapping..."
+              : isInitializing
+                ? "Initializing..."
+                : "Swap"}
           </button>
 
           {lastSwapId && (
@@ -305,10 +181,7 @@ export function AtomiqSwap() {
               </span>
               <button
                 type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText(lastSwapId);
-                  log("Swap ID copied");
-                }}
+                onClick={() => navigator.clipboard.writeText(lastSwapId)}
                 className="rounded-lg bg-amplifi-primary px-2 py-1 text-xs font-medium text-white"
               >
                 Copy
@@ -411,7 +284,7 @@ export function AtomiqSwap() {
               <>
                 <button
                   type="button"
-                  onClick={() => setLogs([])}
+                  onClick={clearLogs}
                   className="mb-2 text-xs text-amplifi-primary underline hover:no-underline"
                 >
                   Clear logs
