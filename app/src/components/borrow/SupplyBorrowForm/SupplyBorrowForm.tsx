@@ -332,18 +332,20 @@ export function SupplyBorrowForm({
           <img src={LOGOS.import} alt="input" className="h-4 w-4 text-amplifi-text" />
           <div className="flex items-center justify-between w-full">
             <span className="text-base text-amplifi-text">Supply Collateral</span>
-            <img
-              src={LOGOS.swap}
-              alt="swap"
-              className="h-5 w-5 text-amplifi-text cursor-pointer"
-              onClick={handleSwap}
-            />
+            {!isOfferSelected && (
+              <img
+                src={LOGOS.swap}
+                alt="swap"
+                className="h-5 w-5 text-amplifi-text cursor-pointer"
+                onClick={handleSwap}
+              />
+            )}
           </div>
         </div>
       </div>
       <div className="flex flex-col items-center justify-between gap-2">
         <div className="flex items-center justify-between w-full">
-          {isSwapped ? (
+          {isSwapped && !isOfferSelected ? (
             // Swapped: supply is computed (read-only)
             <div className="w-full min-w-0 border-0 bg-transparent p-0 text-4xl font-medium text-amplifi-amount min-h-[2.25rem] flex items-center">
               {isQuoteLoading ? (
@@ -353,6 +355,11 @@ export function SupplyBorrowForm({
               ) : (
                 <span className="text-amplifi-muted/80">$0</span>
               )}
+            </div>
+          ) : isOfferSelected ? (
+            // Offer selected: read-only confirmation display
+            <div className="w-full min-w-0 border-0 bg-transparent p-0 text-4xl font-medium text-amplifi-amount min-h-[2.25rem] flex items-center">
+              {supplyAmount ? `$${supplyAmount}` : "$0"}
             </div>
           ) : (
             // Normal: supply is editable
@@ -382,7 +389,7 @@ export function SupplyBorrowForm({
               "—"
             )}
           </div>
-          {!isSwapped && balanceFormatted != null && balanceBtc > 0 && (
+          {!isSwapped && !isOfferSelected && balanceFormatted != null && balanceBtc > 0 && (
             <div className="flex items-center gap-2">
               <span className="text-base text-amplifi-text text-amplifi-muted">
                 {btcBalanceLoading ? "…" : balanceFormatted}
@@ -390,14 +397,14 @@ export function SupplyBorrowForm({
               <button
                 type="button"
                 onClick={() => setSupplyFromPct(50)}
-                className="rounded-[4px] border border-[#E4E4E4] px-2 py-0.5 text-sm text-amplifi-muted"
+                className="cursor-pointer rounded-[4px] border border-[#E4E4E4] px-2 py-0.5 text-sm text-amplifi-muted transition-colors hover:border-amplifi-primary hover:text-amplifi-primary active:bg-amplifi-primary/10"
               >
                 50%
               </button>
               <button
                 type="button"
                 onClick={() => setSupplyFromPct(100)}
-                className="rounded-[4px] border border-[#E4E4E4] px-2 py-0.5 text-sm text-amplifi-muted"
+                className="cursor-pointer rounded-[4px] border border-[#E4E4E4] px-2 py-0.5 text-sm text-amplifi-muted transition-colors hover:border-amplifi-primary hover:text-amplifi-primary active:bg-amplifi-primary/10"
               >
                 Max
               </button>
@@ -529,7 +536,7 @@ export function SupplyBorrowForm({
         <span className="text-base text-amplifi-text">Borrow</span>
       </div>
       <div className="flex items-center justify-between gap-4">
-        {isSwapped ? (
+        {isSwapped && !isOfferSelected ? (
           // Swapped: borrow is editable
           <input
             type="text"
@@ -540,7 +547,7 @@ export function SupplyBorrowForm({
             aria-label="Borrow amount"
           />
         ) : (
-          // Normal: borrow is computed (read-only)
+          // Normal or offer selected: borrow is read-only
           <div className="min-w-0 flex-1 text-4xl font-medium text-amplifi-amount min-h-[2.25rem] flex items-center">
             {isQuoteLoading ? (
               <span className="inline-block h-9 w-20 skeleton-shimmer rounded align-middle" aria-label="Loading borrow amount" />
