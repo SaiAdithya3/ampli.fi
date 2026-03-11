@@ -280,10 +280,18 @@ export function getSwapLimits(dstToken: DstToken) {
   return swapper.getSwapLimits(Tokens.BITCOIN.BTC, token);
 }
 
+const QUOTE_CACHE_TTL_MS = 20_000; // Avoid redundant swapper.swap() calls
+let _quoteCache: { key: string; quote: SwapQuote; expiry: number } | null = null;
+
+function quoteCacheKey(p: { dstToken: DstToken; amountSats: bigint }): string {
+  return `${p.dstToken}:${p.amountSats}`;
+}
+
 /**
  * Fetches a quote for BTC → dstToken swap (onesat pattern).
  * Calls swapper.swap() which creates a swap; we return the quote and discard the swap.
  * A fresh swap is created when the user executes.
+ * Results are cached for 20s to reduce RPC usage.
  */
 export async function getQuote(params: {
   dstToken: DstToken;
@@ -301,6 +309,12 @@ export async function getQuote(params: {
   }
   const swapper = _swapper;
   if (!swapper) return null;
+
+  const key = quoteCacheKey(params);
+  const now = Date.now();
+  if (_quoteCache?.key === key && _quoteCache.expiry > now) {
+    return _quoteCache.quote;
+  }
 
   const token = getStarknetToken(params.dstToken);
   const starkAddr = params.starknetAddress.startsWith("0x")
@@ -327,7 +341,7 @@ export async function getQuote(params: {
     const expiryTime = swap.getQuoteExpiry();
     const expirySeconds = Math.max(0, Math.floor((expiryTime - Date.now()) / 1000));
 
-    return {
+    const quote: SwapQuote = {
       swapId: swap.getId(),
       inputWithoutFee: swap.getInputWithoutFee(),
       fees: swap.getFee().amountInSrcToken,
@@ -336,6 +350,8 @@ export async function getQuote(params: {
       output: swap.getOutput().toString(),
       expirySeconds,
     };
+    _quoteCache = { key, quote, expiry: now + QUOTE_CACHE_TTL_MS };
+    return quote;
   } catch (e) {
     console.error("[atomiq] getQuote failed:", e);
     return null;

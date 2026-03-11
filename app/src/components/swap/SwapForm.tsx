@@ -49,7 +49,7 @@ function formatUsd(usd: number): string {
   return "$" + usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-const QUOTE_REFRESH_MS = 10_000;
+const QUOTE_REFRESH_MS = 30_000; // Reduced from 10s to limit RPC usage
 
 export interface SwapFormProps {
   isInitialized: boolean;

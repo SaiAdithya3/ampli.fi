@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import request from "supertest";
-import { createEarnRouter } from "../src/routes/earn.js";
+import { createEarnRouter, clearPoolsCache } from "../src/routes/earn.js";
 import type { EarnProtocolAdapter } from "../src/lib/earn/protocols.js";
 import type { EarnPool, EarnPosition, EarnHistoryEntry } from "../src/types/earn.js";
 
@@ -158,6 +158,7 @@ test("GET /api/earn/users/:address/history filters by type", async () => {
 });
 
 test("GET /api/earn/pools paginates correctly", async () => {
+  clearPoolsCache();
   const adapterWithManyPools: EarnProtocolAdapter = {
     protocol: "native_staking",
     getPools: async () =>

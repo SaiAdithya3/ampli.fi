@@ -5,7 +5,7 @@ import { BridgeRepository } from "./repository.js";
 import { BridgeService } from "./bridgeService.js";
 import { RpcProvider, hash as starknetHash } from "starknet";
 
-const POLL_INTERVAL_MS = 15_000;
+const POLL_INTERVAL_MS = 30_000; // 30s — reduces RPC load
 const STALE_ORDER_HOURS = 24;
 const BTC_CONFIRMATIONS_REQUIRED = 1;
 const CLAIMING_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour fallback

@@ -1,6 +1,7 @@
 import { hash } from "starknet";
 import type { EarnHistoryEntry, EarnHistoryType } from "../../types/earn.js";
 import type { EarnToken } from "../../types/earn.js";
+import { rpcCall } from "../rpc/client.js";
 
 type RpcEvent = {
   block_number?: number;
@@ -30,31 +31,6 @@ const EVENT_NAME_BY_SELECTOR = new Map<string, EarnHistoryType>([
 function normalizeHex(value: string): string {
   const sanitized = value.toLowerCase();
   return sanitized.startsWith("0x") ? sanitized : `0x${sanitized}`;
-}
-
-async function rpcCall<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
-  const res = await fetch(rpcUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: Date.now(),
-      method,
-      params,
-    }),
-  });
-
-  const payload = (await res.json().catch(() => ({}))) as {
-    result?: T;
-    error?: { message?: string };
-  };
-
-  if (!res.ok || payload.error) {
-    const message = payload.error?.message || `RPC call failed (${res.status})`;
-    throw new Error(message);
-  }
-
-  return payload.result as T;
 }
 
 async function getLatestBlockNumber(rpcUrl: string): Promise<number> {
@@ -88,11 +64,9 @@ function includesAddress(event: RpcEvent, userAddress: string): boolean {
 }
 
 async function getBlockTimestamp(rpcUrl: string, blockNumber: number): Promise<number | null> {
-  const result = await rpcCall<{ timestamp?: number }>(
-    rpcUrl,
-    "starknet_getBlockWithTxHashes",
-    [{ block_number: blockNumber }]
-  );
+  const result = await rpcCall<{ timestamp?: number }>(rpcUrl, "starknet_getBlockWithTxHashes", [
+    { block_number: blockNumber },
+  ]);
   if (typeof result.timestamp !== "number") return null;
   return result.timestamp;
 }
@@ -119,13 +93,13 @@ export async function fetchNativeStakingHistory(params: FetchHistoryParams): Pro
         params.rpcUrl,
         "starknet_getEvents",
         [
-        {
-          from_block: { block_number: fromBlock },
-          to_block: { block_number: latestBlock },
-          address: poolAddress,
-          chunk_size: CHUNK_SIZE,
-          continuation_token: continuationToken,
-        },
+          {
+            from_block: { block_number: fromBlock },
+            to_block: { block_number: latestBlock },
+            address: poolAddress,
+            chunk_size: CHUNK_SIZE,
+            continuation_token: continuationToken,
+          },
         ]
       );
 
