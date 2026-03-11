@@ -24,15 +24,13 @@ export function WalletReconnector() {
   useEffect(() => {
     const runReconnect = () => {
       const state = useWallet.getState();
-      const needsBtcRestore = Boolean(
-        state.bitcoinWalletType && !state.bitcoinWalletInstance
-      );
-      const needsStarknetRestore = Boolean(
+      // Only auto-reconnect Starknet extension wallets.
+      // Bitcoin wallets are NOT reconnected to avoid MetaMask snap popups.
+      const needsRestore = Boolean(
         state.starknetAddress &&
           state.starknetSource === "extension" &&
           !state.starknetSigner
       );
-      const needsRestore = needsBtcRestore || needsStarknetRestore;
 
       if (!needsRestore) return true;
 

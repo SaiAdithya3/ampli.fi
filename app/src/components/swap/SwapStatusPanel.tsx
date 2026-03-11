@@ -20,20 +20,16 @@ function stepToIndex(step: SwapStep): number {
 
 export interface SwapStatusPanelProps {
   step: SwapStep;
-  logs: string[];
   lastSwapId: string | null;
   lastOrderId: string | null;
   onViewOrder?: (orderId: string) => void;
-  clearLogs?: () => void;
 }
 
 export function SwapStatusPanel({
   step,
-  logs,
   lastSwapId,
   lastOrderId,
   onViewOrder,
-  clearLogs,
 }: SwapStatusPanelProps) {
   const activeIndex = stepToIndex(step);
   const isError = step === "error";
@@ -117,7 +113,7 @@ export function SwapStatusPanel({
 
         {isError && (
           <p className="text-sm text-red-600">
-            Swap failed. Check the transaction logs below.
+            Swap failed. Please try again.
           </p>
         )}
       </div>
@@ -141,32 +137,6 @@ export function SwapStatusPanel({
         </div>
       )}
 
-      {/* Transaction logs card */}
-      {logs.length > 0 && (
-        <div className="rounded-amplifi bg-white p-4 sm:p-6">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm font-medium text-amplifi-text">
-              Transaction logs
-            </span>
-            {clearLogs && (
-              <button
-                type="button"
-                onClick={clearLogs}
-                className="text-xs text-amplifi-primary hover:underline"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-          <div className="max-h-48 space-y-1 overflow-auto rounded-lg border border-amplifi-border bg-amplifi-surface-muted px-3 py-2 text-xs font-mono text-amplifi-text">
-            {logs.map((line, i) => (
-              <div key={i} className="leading-relaxed">
-                {line}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

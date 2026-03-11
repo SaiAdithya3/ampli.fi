@@ -259,22 +259,8 @@ export const useWallet = create<WalletState>()(
       },
 
       reconnectWallets: async () => {
-        const s = get();
-        try {
-          if (s.bitcoinWalletType && !s.bitcoinWalletInstance) {
-            await get().connectBitcoin(s.bitcoinWalletType);
-          }
-          const afterBtc = get();
-          if (
-            afterBtc.starknetAddress &&
-            !afterBtc.starknetSigner &&
-            afterBtc.starknetSource === "extension"
-          ) {
-            await get().tryRestoreStarknetAccount();
-          }
-        } catch {
-          // ignore
-        }
+        // No-op: auto-reconnect disabled to avoid MetaMask snap popups.
+        // Users must reconnect wallets manually.
       },
     }),
     {
@@ -290,19 +276,20 @@ export const useWallet = create<WalletState>()(
       onRehydrateStorage: () => (state, err) => {
         if (err || typeof window === "undefined") return;
         if (!state) return;
-        // Defer to next tick to avoid "Cannot access 'useWallet' before initialization"
+        // Clear all persisted wallet state on reload — wallets must be
+        // reconnected manually to avoid MetaMask snap popups.
         setTimeout(() => {
-          const store = useWallet.getState();
-          if (store.bitcoinWalletType && !store.bitcoinWalletInstance) {
-            store.connectBitcoin(store.bitcoinWalletType).catch(() => {});
-          }
-          if (
-            store.starknetAddress &&
-            !store.starknetSigner &&
-            store.starknetSource === "extension"
-          ) {
-            store.tryRestoreStarknetAccount().catch(() => {});
-          }
+          useWallet.setState({
+            bitcoinPaymentAddress: null,
+            bitcoinWalletType: null,
+            bitcoinWalletInstance: null,
+            starknetAddress: null,
+            starknetWalletName: null,
+            starknetSource: null,
+            starknetSigner: null,
+            starknetAccount: null,
+            connected: false,
+          });
         }, 0);
       },
     }

@@ -1,15 +1,12 @@
-import { useMemo, useEffect } from "react";
+import { useMemo } from "react";
 import { ChainDataContext } from "./ChainDataContext";
 import { useWallet } from "@/store/useWallet";
 
 export function ChainDataProvider({ children }: { children: React.ReactNode }) {
-  const { starknetAccount, starknetWalletName, connectStarknet, starknetAddress, tryRestoreStarknetAccount } = useWallet();
+  const { starknetAccount, starknetWalletName, connectStarknet } = useWallet();
 
-  useEffect(() => {
-    if (starknetAddress && !starknetAccount) {
-      tryRestoreStarknetAccount();
-    }
-  }, [starknetAddress, starknetAccount, tryRestoreStarknetAccount]);
+  // Auto-restore disabled to avoid MetaMask snap popups on page load.
+  // Users must reconnect wallets manually.
 
   const contextValue = useMemo(() => {
     return {

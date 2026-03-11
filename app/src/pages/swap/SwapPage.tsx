@@ -9,10 +9,8 @@ export function SwapPage() {
     isInitialized,
     isInitializing,
     step,
-    logs,
     lastSwapId,
     lastOrderId,
-    clearLogs,
     runSwap,
     getSwapLimits,
     getQuote,
@@ -53,11 +51,9 @@ export function SwapPage() {
         <div className="w-full min-w-0">
           <SwapStatusPanel
             step={step}
-            logs={logs}
             lastSwapId={lastSwapId}
             lastOrderId={lastOrderId}
             onViewOrder={handleViewOrder}
-            clearLogs={clearLogs}
           />
         </div>
       </div>
