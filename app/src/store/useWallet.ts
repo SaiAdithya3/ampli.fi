@@ -259,8 +259,16 @@ export const useWallet = create<WalletState>()(
       },
 
       reconnectWallets: async () => {
-        // No-op: auto-reconnect disabled to avoid MetaMask snap popups.
-        // Users must reconnect wallets manually.
+        // Only auto-reconnect Bitcoin wallets. Starknet is manual-only
+        // to avoid MetaMask snap popups.
+        try {
+          const s = get();
+          if (s.bitcoinWalletType && !s.bitcoinWalletInstance) {
+            await get().connectBitcoin(s.bitcoinWalletType);
+          }
+        } catch {
+          // ignore
+        }
       },
     }),
     {
@@ -276,20 +284,24 @@ export const useWallet = create<WalletState>()(
       onRehydrateStorage: () => (state, err) => {
         if (err || typeof window === "undefined") return;
         if (!state) return;
-        // Clear all persisted wallet state on reload — wallets must be
-        // reconnected manually to avoid MetaMask snap popups.
         setTimeout(() => {
-          useWallet.setState({
-            bitcoinPaymentAddress: null,
-            bitcoinWalletType: null,
-            bitcoinWalletInstance: null,
-            starknetAddress: null,
-            starknetWalletName: null,
-            starknetSource: null,
-            starknetSigner: null,
-            starknetAccount: null,
-            connected: false,
-          });
+          const store = useWallet.getState();
+          // Auto-reconnect Bitcoin wallets
+          if (store.bitcoinWalletType && !store.bitcoinWalletInstance) {
+            store.connectBitcoin(store.bitcoinWalletType).catch(() => {});
+          }
+          // Clear persisted Starknet state — must reconnect manually
+          // to avoid MetaMask snap popups.
+          if (store.starknetAddress) {
+            useWallet.setState({
+              starknetAddress: null,
+              starknetWalletName: null,
+              starknetSource: null,
+              starknetSigner: null,
+              starknetAccount: null,
+              connected: !!store.bitcoinPaymentAddress,
+            });
+          }
         }, 0);
       },
     }
