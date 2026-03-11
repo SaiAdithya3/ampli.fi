@@ -60,10 +60,20 @@ function pickAdapters(
   return allAdapters.filter((adapter) => adapter.protocol === protocol);
 }
 
+const POOLS_CACHE_TTL_MS = 300_000; // 5min — pools change infrequently, reduces RPC load
+const poolsCacheMap = new Map<string, { data: TaggedEarn<EarnPool>[]; expiry: number }>();
+
 async function collectPools(
   adapters: EarnProtocolAdapter[],
   validator?: string
 ): Promise<TaggedEarn<EarnPool>[]> {
+  const now = Date.now();
+  const cacheKey = adapters.map((a) => a.protocol).sort().join(",") + "|" + (validator ?? "");
+  const cached = poolsCacheMap.get(cacheKey);
+  if (cached && cached.expiry > now) {
+    return cached.data;
+  }
+
   const entries = await Promise.all(
     adapters.map(async (adapter) => {
       if (!adapter.getPools) return [];
@@ -71,27 +81,59 @@ async function collectPools(
       return pools.map((pool) => ({ protocol: adapter.protocol, data: pool }));
     })
   );
-  return entries.flat();
+  const result = entries.flat();
+  poolsCacheMap.set(cacheKey, { data: result, expiry: now + POOLS_CACHE_TTL_MS });
+  return result;
 }
+
+const POSITIONS_CACHE_TTL_MS = 60_000; // 1min
+const positionsCacheMap = new Map<string, { data: TaggedEarn<EarnPosition>[]; expiry: number }>();
 
 async function collectPositions(
   adapters: EarnProtocolAdapter[],
   walletAddress: string
 ): Promise<TaggedEarn<EarnPosition>[]> {
+  const now = Date.now();
+  const cacheKey = adapters.map((a) => a.protocol).sort().join(",") + "|" + walletAddress.toLowerCase();
+  const cached = positionsCacheMap.get(cacheKey);
+  if (cached && cached.expiry > now) {
+    return cached.data;
+  }
+
   const entries = await Promise.all(
     adapters.map(async (adapter) => {
       const positions = await adapter.getPositions(walletAddress);
       return positions.map((position) => ({ protocol: adapter.protocol, data: position }));
     })
   );
-  return entries.flat();
+  const result = entries.flat();
+  positionsCacheMap.set(cacheKey, { data: result, expiry: now + POSITIONS_CACHE_TTL_MS });
+  return result;
 }
+
+/** Clear pools cache (for testing). */
+export function clearPoolsCache(): void {
+  poolsCacheMap.clear();
+  positionsCacheMap.clear();
+  historyCacheMap.clear();
+}
+
+const HISTORY_CACHE_TTL_MS = 60_000; // 1min
+const historyCacheMap = new Map<string, { data: TaggedEarn<EarnHistoryEntry>[]; expiry: number }>();
 
 async function collectHistory(
   adapters: EarnProtocolAdapter[],
   walletAddress: string,
   type?: string
 ): Promise<TaggedEarn<EarnHistoryEntry>[]> {
+  const now = Date.now();
+  const cacheKey =
+    adapters.map((a) => a.protocol).sort().join(",") + "|" + walletAddress.toLowerCase() + "|" + (type ?? "");
+  const cached = historyCacheMap.get(cacheKey);
+  if (cached && cached.expiry > now) {
+    return cached.data;
+  }
+
   const entries = await Promise.all(
     adapters.map(async (adapter) => {
       if (!adapter.getHistory) return [];
@@ -99,7 +141,9 @@ async function collectHistory(
       return history.map((item) => ({ protocol: adapter.protocol, data: item }));
     })
   );
-  return entries.flat();
+  const result = entries.flat();
+  historyCacheMap.set(cacheKey, { data: result, expiry: now + HISTORY_CACHE_TTL_MS });
+  return result;
 }
 
 export function createEarnRouter(adapters: EarnProtocolAdapter[] = getEarnProtocolAdapters()): Router {

@@ -44,9 +44,44 @@ function getStakingConfig(): { contract: Address } {
   return { contract: fromAddress(contract) };
 }
 
+/**
+ * Top mainnet validators by delegation/recognition.
+ * Keeps getStakerPools() to ~25 validators × ~2 RPC calls = ~50 calls
+ * instead of 138 × 2 = ~276 (most of which fail with "Staker does not exist").
+ */
+const MAINNET_VALIDATOR_WHITELIST = new Set([
+  "Karnot",
+  "Twinstake",
+  "AVNU",
+  "Braavos",
+  "Binance",
+  "Nethermind",
+  "Nansen",
+  "Pragma",
+  "Figment",
+  "P2P.org",
+  "stakefish",
+  "Carbonable",
+  "Keplr",
+  "Cartridge",
+  "Zellic",
+  "Herodotus",
+  "Fibrous",
+  "Stakely",
+  "Allnodes",
+  "zkLend",
+  "Anchorage Digital",
+  "Stakecito",
+  "DSRV",
+  "Moonlet",
+  "Cumulo",
+]);
+
 function getValidators(): Validator[] {
   if (settings.network === "mainnet") {
-    return Object.values(mainnetValidators);
+    return Object.values(mainnetValidators).filter((v) =>
+      MAINNET_VALIDATOR_WHITELIST.has(v.name)
+    );
   }
   return Object.values(sepoliaValidators);
 }
@@ -59,14 +94,12 @@ function toToken(token: Pool["token"]): EarnToken {
   };
 }
 
-async function toEarnPool(
-  sdk: StarkZap,
-  validator: Validator,
-  pool: Pool
-): Promise<EarnPool> {
-  const staking = await Staking.fromPool(pool.poolContract, sdk.getProvider(), getStakingConfig());
-  const commissionPercent = await staking.getCommission().catch(() => null);
-
+/**
+ * Lightweight pool conversion — avoids Staking.fromPool() and getCommission()
+ * which each trigger 3-4 extra RPC calls per pool. Commission is fetched
+ * lazily when the user selects a pool to stake in.
+ */
+function toEarnPoolLight(validator: Validator, pool: Pool): EarnPool {
   return {
     id: `${validator.stakerAddress}:${pool.poolContract}`,
     poolContract: pool.poolContract,
@@ -76,7 +109,7 @@ async function toEarnPool(
     },
     token: toToken(pool.token),
     delegatedAmount: pool.amount.toUnit(),
-    commissionPercent,
+    commissionPercent: null,
   };
 }
 
@@ -87,14 +120,22 @@ async function getPools(validatorFilter?: string): Promise<EarnPool[]> {
     ? validators.filter((entry) => entry.stakerAddress.toLowerCase() === validatorFilter.toLowerCase())
     : validators;
 
-  const allPools = await Promise.all(
-    filteredValidators.map(async (validator) => {
+  const allPools: EarnPool[] = [];
+  for (const validator of filteredValidators) {
+    try {
       const pools = await sdk.getStakerPools(validator.stakerAddress);
-      return Promise.all(pools.map((pool: Pool) => toEarnPool(sdk, validator, pool)));
-    })
-  );
-
-  return allPools.flat();
+      for (const pool of pools) {
+        allPools.push(toEarnPoolLight(validator, pool));
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("Staker does not exist")) {
+        continue;
+      }
+      throw err;
+    }
+  }
+  return allPools;
 }
 
 async function getPosition(
@@ -126,11 +167,12 @@ async function getPosition(
 async function getPositions(userAddress: string): Promise<EarnPosition[]> {
   const sdk = getSdk();
   const pools = await getPools();
-  const results = await Promise.all(
-    pools.map(async (pool) => getPosition(sdk, pool.poolContract, userAddress, pool.token))
-  );
-
-  return results.filter((entry): entry is EarnPosition => !!entry);
+  const results: EarnPosition[] = [];
+  for (const pool of pools) {
+    const pos = await getPosition(sdk, pool.poolContract, userAddress, pool.token);
+    if (pos) results.push(pos);
+  }
+  return results;
 }
 
 async function getHistory(userAddress: string, opts?: { type?: string }): Promise<EarnHistoryEntry[]> {

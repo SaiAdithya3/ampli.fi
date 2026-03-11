@@ -9,8 +9,11 @@ import earnRoutes from "./routes/earn.js";
 import mempoolRoutes from "./routes/mempool.js";
 import { traceMiddleware } from "./middleware/trace.js";
 import { settings } from "./lib/settings.js";
+import { patchRpcFetch } from "./lib/rpc/client.js";
 import { runMigrations } from "./db/migrate.js";
 import { getBridgeReconciler } from "./lib/bridge/index.js";
+
+patchRpcFetch(settings.rpc_url);
 
 const app = express();
 const PORT = settings.port;
