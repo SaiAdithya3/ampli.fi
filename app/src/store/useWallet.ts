@@ -259,12 +259,18 @@ export const useWallet = create<WalletState>()(
       },
 
       reconnectWallets: async () => {
-        // Only auto-reconnect Bitcoin wallets. Starknet is manual-only
-        // to avoid MetaMask snap popups.
+        const s = get();
         try {
-          const s = get();
           if (s.bitcoinWalletType && !s.bitcoinWalletInstance) {
             await get().connectBitcoin(s.bitcoinWalletType);
+          }
+          const afterBtc = get();
+          if (
+            afterBtc.starknetAddress &&
+            !afterBtc.starknetSigner &&
+            afterBtc.starknetSource === "extension"
+          ) {
+            await get().tryRestoreStarknetAccount();
           }
         } catch {
           // ignore
@@ -284,23 +290,18 @@ export const useWallet = create<WalletState>()(
       onRehydrateStorage: () => (state, err) => {
         if (err || typeof window === "undefined") return;
         if (!state) return;
+        // Defer to next tick to avoid "Cannot access 'useWallet' before initialization"
         setTimeout(() => {
           const store = useWallet.getState();
-          // Auto-reconnect Bitcoin wallets
           if (store.bitcoinWalletType && !store.bitcoinWalletInstance) {
             store.connectBitcoin(store.bitcoinWalletType).catch(() => {});
           }
-          // Clear persisted Starknet state — must reconnect manually
-          // to avoid MetaMask snap popups.
-          if (store.starknetAddress) {
-            useWallet.setState({
-              starknetAddress: null,
-              starknetWalletName: null,
-              starknetSource: null,
-              starknetSigner: null,
-              starknetAccount: null,
-              connected: !!store.bitcoinPaymentAddress,
-            });
+          if (
+            store.starknetAddress &&
+            !store.starknetSigner &&
+            store.starknetSource === "extension"
+          ) {
+            store.tryRestoreStarknetAccount().catch(() => {});
           }
         }, 0);
       },

@@ -20,7 +20,7 @@ export function StarknetProvider({ children }: StarknetProviderProps) {
       provider={starknetProviders}
       connectors={connectors}
       defaultChainId={defaultChainId}
-      autoConnect={false}
+      autoConnect
     >
       {children}
     </StarknetConfig>

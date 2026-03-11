@@ -8,9 +8,9 @@ const RETRY_INTERVAL_MS = 2500;
 const MAX_ATTEMPTS = 4;
 
 /**
- * WalletReconnector: Detects wallet providers and restores Bitcoin wallet
- * instances on page reload. Starknet wallets are NOT auto-reconnected
- * to avoid MetaMask snap popups.
+ * WalletReconnector: Restores wallet instances on page reload when we have
+ * persisted addresses/types but no live instances. Uses setInterval so the
+ * timer is NOT cancelled when state changes (e.g. Starknet restore succeeding).
  */
 export function WalletReconnector() {
   const { detectProviders, reconnectWallets } = useWallet();
@@ -27,8 +27,14 @@ export function WalletReconnector() {
       const needsBtcRestore = Boolean(
         state.bitcoinWalletType && !state.bitcoinWalletInstance
       );
+      const needsStarknetRestore = Boolean(
+        state.starknetAddress &&
+          state.starknetSource === "extension" &&
+          !state.starknetSigner
+      );
+      const needsRestore = needsBtcRestore || needsStarknetRestore;
 
-      if (!needsBtcRestore) return true;
+      if (!needsRestore) return true;
 
       if (attemptCount.current >= MAX_ATTEMPTS) return true;
 
