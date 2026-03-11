@@ -34,6 +34,28 @@ function splitU256(value: bigint): { low: string; high: string } {
   };
 }
 
+function toHex(raw: unknown): string {
+  return typeof raw === "string" ? raw : "0x" + BigInt(String(raw)).toString(16);
+}
+
+/**
+ * Try reading pool_id and extension from the vToken (Vesu v1).
+ * Returns null if the contract doesn't implement these (Vesu v2 ERC4626 vaults).
+ */
+async function tryReadV1PoolInfo(
+  vTokenContract: InstanceType<typeof Contract>
+): Promise<{ poolId: string; poolAddress: string } | null> {
+  try {
+    const [poolIdRaw, extensionRaw] = await Promise.all([
+      vTokenContract.pool_id(),
+      vTokenContract.extension(),
+    ]);
+    return { poolId: toHex(poolIdRaw), poolAddress: toHex(extensionRaw) };
+  } catch {
+    return null;
+  }
+}
+
 export function useVesuBorrow(): UseVesuBorrowResult {
   const { starknetAccount } = useWallet();
   const [isBorrowing, setIsBorrowing] = useState(false);
@@ -60,28 +82,9 @@ export function useVesuBorrow(): UseVesuBorrowResult {
         const provider = new RpcProvider({ nodeUrl: RPC_URL });
         const vTokenContract = new Contract(vTokenABI, vTokenAddress, starknetAccount);
 
-        // Get pool_id from vToken
-        const poolIdRaw = await vTokenContract.pool_id();
-        const poolId =
-          typeof poolIdRaw === "string"
-            ? poolIdRaw
-            : "0x" + poolIdRaw.toString(16);
-
-        // Get pool address from vToken.extension()
-        const extensionRaw = await vTokenContract.extension();
-        const poolAddress =
-          typeof extensionRaw === "string"
-            ? extensionRaw
-            : "0x" + extensionRaw.toString(16);
-
-        // Get collateral asset from vToken.asset()
         const assetAddressRaw = await vTokenContract.asset();
-        const assetAddress =
-          typeof assetAddressRaw === "string"
-            ? assetAddressRaw
-            : "0x" + assetAddressRaw.toString(16);
+        const assetAddress = toHex(assetAddressRaw);
 
-        // Check WBTC balance
         const assetContract = new Contract(vTokenABI, assetAddress, starknetAccount);
         const balanceRaw = await assetContract.balanceOf(starknetAccount.address);
         const balance = BigInt(balanceRaw.toString());
@@ -93,61 +96,75 @@ export function useVesuBorrow(): UseVesuBorrowResult {
         }
 
         const requestedCollateral = BigInt(collateralAmount);
-        // Use the lesser of requested amount and actual balance
         const depositAmount = requestedCollateral > balance ? balance : requestedCollateral;
 
-        // Check existing allowance, approve to Pool contract if needed
-        const allowanceRaw = await assetContract.allowance(starknetAccount.address, poolAddress);
+        const v1Info = await tryReadV1PoolInfo(vTokenContract);
+
+        if (v1Info) {
+          // --- Vesu v1: modify_position on the extension (singleton) contract ---
+          const { poolId, poolAddress } = v1Info;
+          const allowanceRaw = await assetContract.allowance(starknetAccount.address, poolAddress);
+          const allowance = BigInt(allowanceRaw.toString());
+
+          const calls: { contractAddress: string; entrypoint: string; calldata: string[] }[] = [];
+          if (allowance < depositAmount) {
+            const { low: approveLow, high: approveHigh } = splitU256(depositAmount);
+            calls.push({
+              contractAddress: assetAddress,
+              entrypoint: "approve",
+              calldata: [poolAddress, approveLow, approveHigh],
+            });
+          }
+
+          const { low: collateralLow, high: collateralHigh } = splitU256(depositAmount);
+          const borrowValue = BigInt(borrowAmount);
+          const { low: borrowLow, high: borrowHigh } = splitU256(borrowValue);
+
+          calls.push({
+            contractAddress: poolAddress,
+            entrypoint: "modify_position",
+            calldata: [
+              poolId,
+              collateralAssetAddress,
+              debtAssetAddress,
+              starknetAccount.address,
+              "1", "1", collateralLow, collateralHigh, "0",
+              "1", "1", borrowLow, borrowHigh, "0",
+              "0",
+            ],
+          });
+
+          const result = await starknetAccount.execute(calls);
+          await provider.waitForTransaction(result.transaction_hash);
+
+          return {
+            txHash: result.transaction_hash,
+            poolAddress,
+            poolId,
+            actualCollateralAmount: depositAmount.toString(),
+            actualBorrowAmount: borrowValue.toString(),
+          };
+        }
+
+        // --- Vesu v2: ERC4626 deposit on the vToken ---
+        const allowanceRaw = await assetContract.allowance(starknetAccount.address, vTokenAddress);
         const allowance = BigInt(allowanceRaw.toString());
 
         const calls: { contractAddress: string; entrypoint: string; calldata: string[] }[] = [];
-
         if (allowance < depositAmount) {
           const { low: approveLow, high: approveHigh } = splitU256(depositAmount);
           calls.push({
             contractAddress: assetAddress,
             entrypoint: "approve",
-            calldata: [poolAddress, approveLow, approveHigh],
+            calldata: [vTokenAddress, approveLow, approveHigh],
           });
         }
 
-        // Build modify_position calldata
-        // modify_position(pool_id, collateral_asset, debt_asset, user, collateral, debt, data)
-        //
-        // Vesu Pool.modify_position params:
-        //   collateral_asset: ContractAddress
-        //   debt_asset: ContractAddress
-        //   user: ContractAddress
-        //   collateral: Amount { amount_type: felt252, denomination: felt252, value: i257 { abs: u256, is_negative: bool } }
-        //   debt: Amount { amount_type: felt252, denomination: felt252, value: i257 { abs: u256, is_negative: bool } }
-        //   data: Span<felt252>
-        const { low: collateralLow, high: collateralHigh } = splitU256(depositAmount);
-        const borrowValue = BigInt(borrowAmount);
-        const { low: borrowLow, high: borrowHigh } = splitU256(borrowValue);
-
+        const { low: depositLow, high: depositHigh } = splitU256(depositAmount);
         calls.push({
-          contractAddress: poolAddress,
-          entrypoint: "modify_position",
-          calldata: [
-            poolId,                    // pool_id
-            collateralAssetAddress,    // collateral_asset
-            debtAssetAddress,          // debt_asset
-            starknetAccount.address,   // user
-            // collateral Amount:
-            "1",                       // amount_type = Delta (1)
-            "1",                       // denomination = Assets (1)
-            collateralLow,             // value.abs.low
-            collateralHigh,            // value.abs.high
-            "0",                       // value.is_negative = false
-            // debt Amount:
-            "1",                       // amount_type = Delta (1)
-            "1",                       // denomination = Assets (1)
-            borrowLow,                 // value.abs.low
-            borrowHigh,                // value.abs.high
-            "0",                       // value.is_negative = false
-            // data: empty Span<felt252>
-            "0",                       // data length = 0
-          ],
+          contractAddress: vTokenAddress,
+          entrypoint: "deposit",
+          calldata: [depositLow, depositHigh, starknetAccount.address],
         });
 
         const result = await starknetAccount.execute(calls);
@@ -155,10 +172,10 @@ export function useVesuBorrow(): UseVesuBorrowResult {
 
         return {
           txHash: result.transaction_hash,
-          poolAddress,
-          poolId,
+          poolAddress: vTokenAddress,
+          poolId: "",
           actualCollateralAmount: depositAmount.toString(),
-          actualBorrowAmount: borrowValue.toString(),
+          actualBorrowAmount: "0",
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to supply & borrow";
