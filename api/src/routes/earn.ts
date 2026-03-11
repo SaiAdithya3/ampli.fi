@@ -157,6 +157,22 @@ export function createEarnRouter(adapters: EarnProtocolAdapter[] = getEarnProtoc
       const selected = pickAdapters(adapters, protocol);
       const tagged = await collectPools(selected, validator);
       const paged = paginate(tagged, pagination);
+
+      const adapterByProtocol = new Map(adapters.map((a) => [a.protocol, a]));
+      const byProtocol = new Map<string, EarnPool[]>();
+      for (const item of paged.data) {
+        if (item.data.commissionPercent !== null) continue;
+        const list = byProtocol.get(item.protocol) ?? [];
+        list.push(item.data);
+        byProtocol.set(item.protocol, list);
+      }
+      for (const [proto, pools] of byProtocol) {
+        const adapter = adapterByProtocol.get(proto);
+        if (adapter?.enrichPoolCommissions) {
+          await adapter.enrichPoolCommissions(pools);
+        }
+      }
+
       return res.json({ data: paged.data, meta: paged.meta });
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Failed to fetch earn pools";

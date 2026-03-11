@@ -10,10 +10,38 @@ import {
   type Validator,
   type WalletInterface,
 } from "starkzap";
+import { Contract, RpcProvider } from "starknet";
 import type { EarnProtocolAdapter } from "./protocols.js";
 import type { EarnHistoryEntry, EarnPool, EarnPosition, EarnToken } from "../../types/earn.js";
 import { settings } from "../settings.js";
 import { fetchNativeStakingHistory } from "./eventFetcher.js";
+
+const POOL_COMMISSION_ABI = [
+  {
+    type: "interface" as const,
+    name: "staking::pool::interface::IPool",
+    items: [
+      {
+        type: "function" as const,
+        name: "contract_parameters_v1",
+        inputs: [] as const,
+        outputs: [{ type: "staking::pool::interface::PoolContractInfoV1" }],
+        state_mutability: "view" as const,
+      },
+    ],
+  },
+  {
+    type: "struct" as const,
+    name: "staking::pool::interface::PoolContractInfoV1",
+    members: [
+      { name: "staker_address", type: "core::starknet::contract_address::ContractAddress" },
+      { name: "staker_removed", type: "core::bool" },
+      { name: "staking_contract", type: "core::starknet::contract_address::ContractAddress" },
+      { name: "token_address", type: "core::starknet::contract_address::ContractAddress" },
+      { name: "commission", type: "core::integer::u16" },
+    ],
+  },
+];
 
 const PROTOCOL = "native_staking";
 const MAINNET_STAKING_CONTRACT =
@@ -197,11 +225,31 @@ async function getHistory(userAddress: string, opts?: { type?: string }): Promis
   return history.filter((entry) => entry.type === opts.type);
 }
 
+async function fetchPoolCommission(poolContract: string): Promise<number | null> {
+  try {
+    const provider = new RpcProvider({ nodeUrl: settings.rpc_url });
+    const contract = new Contract({ abi: POOL_COMMISSION_ABI, address: poolContract, providerOrAccount: provider });
+    const params = await (contract as any).contract_parameters_v1();
+    return Number(params.commission) / 100;
+  } catch {
+    return null;
+  }
+}
+
+async function enrichPoolCommissions(pools: EarnPool[]): Promise<void> {
+  for (const pool of pools) {
+    if (pool.commissionPercent === null) {
+      pool.commissionPercent = await fetchPoolCommission(pool.poolContract);
+    }
+  }
+}
+
 export function createNativeStakingAdapter(): EarnProtocolAdapter {
   return {
     protocol: PROTOCOL,
     getPools,
     getPositions,
     getHistory,
+    enrichPoolCommissions,
   };
 }
