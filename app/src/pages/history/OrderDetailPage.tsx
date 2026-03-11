@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getOrder, updateSupplyTx, type BridgeOrder } from "@/lib/amplifi-api";
+import { getOrder, updateSupplyTx, updateBorrowTx, updateDepositParams, type BridgeOrder } from "@/lib/amplifi-api";
 import {
   ASSET_ICONS,
   BTC_EXPLORER_BASE,
@@ -12,6 +12,7 @@ import {
   type DepositPhase,
 } from "@/components/borrow/LoanStatusPanel";
 import { useVesuDeposit } from "@/hooks/useVesuDeposit";
+import { useVesuBorrow } from "@/hooks/useVesuBorrow";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {
@@ -66,6 +67,7 @@ export function OrderDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [depositPhase, setDepositPhase] = useState<DepositPhase>("idle");
   const { deposit, error: depositError } = useVesuDeposit();
+  const { borrow, error: borrowError } = useVesuBorrow();
 
   const TERMINAL_STATUSES = ["SETTLED", "FAILED", "EXPIRED", "REFUNDED"];
   const POLL_INTERVAL_MS = 3000;
@@ -113,12 +115,42 @@ export function OrderDetailPage() {
     };
   }, [orderId]);
 
+  const hasBorrowParams =
+    !!order?.depositParams?.debtAssetAddress &&
+    !!order?.depositParams?.borrowAmount &&
+    !!order?.depositParams?.collateralAssetAddress;
+
   const handleDepositCollateral = useCallback(async () => {
     if (!order?.depositParams || !orderId) return;
-    const { vTokenAddress, collateralAmount } = order.depositParams;
+    const dp = order.depositParams;
     setDepositPhase("depositing");
     try {
-      const txHash = await deposit(collateralAmount, vTokenAddress);
+      let txHash: string;
+      if (dp.debtAssetAddress && dp.borrowAmount && dp.collateralAssetAddress) {
+        // Use modify_position: supply collateral + borrow in one tx
+        const result = await borrow({
+          vTokenAddress: dp.vTokenAddress,
+          collateralAmount: dp.collateralAmount,
+          collateralAssetAddress: dp.collateralAssetAddress,
+          debtAssetAddress: dp.debtAssetAddress,
+          borrowAmount: dp.borrowAmount,
+        });
+        txHash = result.txHash;
+        updateBorrowTx(orderId, txHash).catch((err) =>
+          console.error("Failed to persist borrowTxId:", err),
+        );
+        updateDepositParams(orderId, {
+          poolAddress: result.poolAddress,
+          poolId: result.poolId,
+          collateralAmount: result.actualCollateralAmount,
+          borrowAmount: result.actualBorrowAmount,
+        }).catch((err) =>
+          console.error("Failed to persist deposit params:", err),
+        );
+      } else {
+        // Fallback: old-style deposit only
+        txHash = await deposit(dp.collateralAmount, dp.vTokenAddress);
+      }
       setDepositPhase("done");
       if (txHash) {
         updateSupplyTx(orderId, txHash).catch((err) =>
@@ -129,7 +161,7 @@ export function OrderDetailPage() {
       console.error("Vesu deposit failed:", err);
       setDepositPhase("error");
     }
-  }, [order, orderId, deposit]);
+  }, [order, orderId, deposit, borrow]);
 
   if (!orderId) {
     return (
@@ -239,8 +271,9 @@ export function OrderDetailPage() {
         {needsDeposit && (
           <div className="rounded-lg bg-blue-50 p-4 space-y-3">
             <p className="text-sm text-blue-800">
-              The BTC swap is complete. Deposit your collateral to activate your
-              lending position.
+              {hasBorrowParams
+                ? "The BTC swap is complete. Supply collateral and borrow to activate your position."
+                : "The BTC swap is complete. Deposit your collateral to activate your lending position."}
             </p>
             <button
               type="button"
@@ -249,12 +282,12 @@ export function OrderDetailPage() {
               className="rounded-lg bg-[#00CD3B] px-4 py-2 text-sm font-medium text-white hover:bg-[#00b534] disabled:opacity-50"
             >
               {depositPhase === "depositing"
-                ? "Depositing…"
-                : "Deposit Collateral"}
+                ? (hasBorrowParams ? "Supplying & Borrowing…" : "Depositing…")
+                : (hasBorrowParams ? "Supply & Borrow" : "Deposit Collateral")}
             </button>
             {depositPhase === "error" && (
               <p className="text-sm text-red-600">
-                {depositError ?? "Collateral deposit failed"}
+                {(hasBorrowParams ? borrowError : depositError) ?? "Collateral deposit failed"}
               </p>
             )}
           </div>

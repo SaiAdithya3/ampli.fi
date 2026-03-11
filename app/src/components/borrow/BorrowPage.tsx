@@ -1,9 +1,10 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { SupplyBorrowForm } from "./SupplyBorrowForm";
 import { BorrowOffers, type LoanFlowState } from "./BorrowOffers";
-import { type LoanOfferItem, updateSupplyTx, getOrder } from "@/lib/amplifi-api";
+import { type LoanOfferItem, updateSupplyTx, updateBorrowTx, updateDepositParams, getOrder } from "@/lib/amplifi-api";
 import { useAtomiqSwap } from "@/hooks/useAtomiqSwap";
 import { useVesuDeposit } from "@/hooks/useVesuDeposit";
+import { useVesuBorrow } from "@/hooks/useVesuBorrow";
 import type { DepositPhase } from "./LoanStatusPanel";
 
 export function BorrowPage() {
@@ -21,6 +22,7 @@ export function BorrowPage() {
 
   const { step, lastOrderId, runSwap } = useAtomiqSwap();
   const { deposit, error: depositError } = useVesuDeposit();
+  const { borrow, error: borrowError } = useVesuBorrow();
 
   const isSendingBtc = step !== "idle" && step !== "settled" && step !== "error";
 
@@ -34,6 +36,9 @@ export function BorrowPage() {
 
     let vTokenAddress: string | undefined;
     let rawAmount: string | undefined;
+    let debtAssetAddress: string | undefined;
+    let borrowAmount: string | undefined;
+    let collateralAssetAddress: string | undefined;
 
     // Try selectedOffer first, fall back to order's depositParams
     if (selectedOffer) {
@@ -45,6 +50,17 @@ export function BorrowPage() {
           Math.floor(quote.requiredCollateralAmount * 10 ** decimals)
         ).toString();
       }
+      // Gather borrow params from offer
+      const borrowData = selectedOffer.item.data.borrow;
+      const collateralData = selectedOffer.item.data.collateral;
+      if (borrowData?.address) {
+        debtAssetAddress = borrowData.address;
+        collateralAssetAddress = collateralData.address;
+        const borrowDecimals = borrowData.decimals ?? 6;
+        if (quote?.borrowUsd) {
+          borrowAmount = BigInt(Math.floor(quote.borrowUsd * 10 ** borrowDecimals)).toString();
+        }
+      }
     }
 
     // Fallback: read depositParams from the persisted order
@@ -55,6 +71,11 @@ export function BorrowPage() {
         if (dp) {
           vTokenAddress = dp.vTokenAddress;
           rawAmount = dp.collateralAmount;
+          if (!debtAssetAddress && dp.debtAssetAddress) {
+            debtAssetAddress = dp.debtAssetAddress;
+            borrowAmount = dp.borrowAmount;
+            collateralAssetAddress = dp.collateralAssetAddress;
+          }
         }
       } catch {
         // ignore fetch errors, will fail below
@@ -71,7 +92,34 @@ export function BorrowPage() {
     setDepositPhase("depositing");
 
     try {
-      const txHash = await deposit(rawAmount, vTokenAddress);
+      let txHash: string;
+      if (debtAssetAddress && borrowAmount && collateralAssetAddress) {
+        // Use modify_position: supply collateral + borrow in one tx
+        const result = await borrow({
+          vTokenAddress,
+          collateralAmount: rawAmount,
+          collateralAssetAddress,
+          debtAssetAddress,
+          borrowAmount,
+        });
+        txHash = result.txHash;
+        if (lastOrderId) {
+          updateBorrowTx(lastOrderId, txHash).catch((err) =>
+            console.error("Failed to persist borrowTxId:", err)
+          );
+          updateDepositParams(lastOrderId, {
+            poolAddress: result.poolAddress,
+            poolId: result.poolId,
+            collateralAmount: result.actualCollateralAmount,
+            borrowAmount: result.actualBorrowAmount,
+          }).catch((err) =>
+            console.error("Failed to persist deposit params:", err)
+          );
+        }
+      } else {
+        // Fallback: old-style deposit only
+        txHash = await deposit(rawAmount, vTokenAddress);
+      }
       setDepositPhase("done");
       if (lastOrderId && txHash) {
         updateSupplyTx(lastOrderId, txHash).catch((err) =>
@@ -82,7 +130,7 @@ export function BorrowPage() {
       console.error("Vesu deposit failed:", err);
       setDepositPhase("error");
     }
-  }, [selectedOffer, deposit, lastOrderId]);
+  }, [selectedOffer, deposit, borrow, lastOrderId]);
 
   // Auto-deposit WBTC into Vesu after swap settles (frontend step detection)
   useEffect(() => {
@@ -128,7 +176,17 @@ export function BorrowPage() {
       const quote = selectedOffer.item.data.quote;
       const decimals = selectedOffer.item.data.collateral.decimals ?? 8;
 
-      let depositParams: { vTokenAddress: string; collateralAmount: string; decimals: number } | undefined;
+      let depositParams: {
+        vTokenAddress: string;
+        collateralAmount: string;
+        decimals: number;
+        debtAssetAddress?: string;
+        borrowAmount?: string;
+        debtDecimals?: number;
+        collateralAssetAddress?: string;
+        poolId?: string;
+        poolAddress?: string;
+      } | undefined;
       if (vTokenAddress) {
         const collateralAmount = quote?.requiredCollateralAmount;
         if (collateralAmount != null && collateralAmount > 0) {
@@ -148,6 +206,25 @@ export function BorrowPage() {
             ).toString(),
             decimals,
           };
+        }
+
+        // Store poolId from offer
+        depositParams.poolId = selectedOffer.item.data.pool.id;
+
+        // Add borrow fields for modify_position
+        const borrowData = selectedOffer.item.data.borrow;
+        const collateralData = selectedOffer.item.data.collateral;
+        if (borrowData?.address) {
+          depositParams.debtAssetAddress = borrowData.address;
+          depositParams.debtDecimals = borrowData.decimals;
+          depositParams.collateralAssetAddress = collateralData.address;
+          const borrowDecimals = borrowData.decimals ?? 6;
+          const borrowAmountRaw = quote?.borrowUsd
+            ? BigInt(Math.floor(quote.borrowUsd * 10 ** borrowDecimals)).toString()
+            : undefined;
+          if (borrowAmountRaw) {
+            depositParams.borrowAmount = borrowAmountRaw;
+          }
         }
       }
 
@@ -193,7 +270,7 @@ export function BorrowPage() {
             onLoanParamsChange={onLoanParamsChange}
             selectedOffer={selectedOffer}
             onInitiateLoan={handleInitiateLoan}
-            initiateError={initiateError || (depositPhase === "error" ? (depositError ?? "Collateral deposit failed") : null)}
+            initiateError={initiateError || (depositPhase === "error" ? (borrowError ?? depositError ?? "Collateral deposit failed") : null)}
             loanFlow={loanFlow}
           />
         </div>

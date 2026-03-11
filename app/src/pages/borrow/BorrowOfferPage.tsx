@@ -85,7 +85,17 @@ export function BorrowOfferPage() {
       const quote = offer.item.data.quote;
       const decimals = offer.item.data.collateral.decimals ?? 8;
 
-      let depositParams: { vTokenAddress: string; collateralAmount: string; decimals: number } | undefined;
+      let depositParams: {
+        vTokenAddress: string;
+        collateralAmount: string;
+        decimals: number;
+        debtAssetAddress?: string;
+        borrowAmount?: string;
+        debtDecimals?: number;
+        collateralAssetAddress?: string;
+        poolId?: string;
+        poolAddress?: string;
+      } | undefined;
       if (vTokenAddress) {
         const collateralAmount = quote?.requiredCollateralAmount;
         if (collateralAmount != null && collateralAmount > 0) {
@@ -104,6 +114,26 @@ export function BorrowOfferPage() {
             ).toString(),
             decimals,
           };
+        }
+
+        // Store poolId from offer
+        depositParams.poolId = offer.item.data.pool.id;
+
+        // Add borrow fields for modify_position
+        const borrowData = offer.item.data.borrow;
+        const collateralData = offer.item.data.collateral;
+        if (borrowData?.address) {
+          depositParams.debtAssetAddress = borrowData.address;
+          depositParams.debtDecimals = borrowData.decimals;
+          depositParams.collateralAssetAddress = collateralData.address;
+          // Compute borrow amount from borrowAmountUsd / btcPriceUsd equivalent
+          const borrowDecimals = borrowData.decimals ?? 6;
+          const borrowAmountRaw = quote?.borrowUsd
+            ? BigInt(Math.floor(quote.borrowUsd * 10 ** borrowDecimals)).toString()
+            : undefined;
+          if (borrowAmountRaw) {
+            depositParams.borrowAmount = borrowAmountRaw;
+          }
         }
       }
 

@@ -95,6 +95,19 @@ export function validateCreateOrderPayload(payload: unknown): BridgeCreateOrderI
     if (!collateralAmount) throw new Error("depositParams.collateralAmount is required");
     if (!Number.isInteger(decimals) || decimals < 0) throw new Error("depositParams.decimals must be a non-negative integer");
     depositParams = { vTokenAddress, collateralAmount, decimals };
+    // Optional borrow fields
+    const debtAssetAddress = dp.debtAssetAddress ? asString(dp.debtAssetAddress).trim() : undefined;
+    const borrowAmount = dp.borrowAmount ? asString(dp.borrowAmount).trim() : undefined;
+    const debtDecimals = dp.debtDecimals != null ? Number(dp.debtDecimals) : undefined;
+    const collateralAssetAddress = dp.collateralAssetAddress ? asString(dp.collateralAssetAddress).trim() : undefined;
+    if (debtAssetAddress) depositParams.debtAssetAddress = debtAssetAddress;
+    if (borrowAmount) depositParams.borrowAmount = borrowAmount;
+    if (debtDecimals != null && Number.isInteger(debtDecimals) && debtDecimals >= 0) depositParams.debtDecimals = debtDecimals;
+    if (collateralAssetAddress) depositParams.collateralAssetAddress = collateralAssetAddress;
+    const poolId = dp.poolId ? asString(dp.poolId).trim() : undefined;
+    const poolAddress = dp.poolAddress ? asString(dp.poolAddress).trim() : undefined;
+    if (poolId) depositParams.poolId = poolId;
+    if (poolAddress) depositParams.poolAddress = poolAddress;
   }
 
   return {

@@ -19,6 +19,12 @@ export type DepositParams = {
   vTokenAddress: string;
   collateralAmount: string;
   decimals: number;
+  debtAssetAddress?: string;
+  borrowAmount?: string;
+  debtDecimals?: number;
+  collateralAssetAddress?: string;
+  poolId?: string;
+  poolAddress?: string;
 };
 
 export type BridgeCreateOrderInput = {

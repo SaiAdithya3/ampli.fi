@@ -151,6 +151,21 @@ router.patch("/orders/:id/supply-tx", async (req: Request, res: Response) => {
   }
 });
 
+// Update deposit params (enrich with runtime data after borrow)
+router.patch("/orders/:id/deposit-params", async (req: Request, res: Response) => {
+  try {
+    const orderId = req.params.id?.trim();
+    if (!orderId) return res.status(400).json({ error: "order id is required" });
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (!body || typeof body !== "object") return res.status(400).json({ error: "body is required" });
+    const service = await getService();
+    const order = await service.updateDepositParams(orderId, body as Record<string, string>);
+    return res.json({ data: order });
+  } catch (error: unknown) {
+    return handleRouteError(res, error);
+  }
+});
+
 // Link borrow transaction hash (Vesu borrow execution)
 router.patch("/orders/:id/borrow-tx", async (req: Request, res: Response) => {
   try {

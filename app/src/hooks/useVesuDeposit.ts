@@ -34,16 +34,39 @@ export function useVesuDeposit(): UseVesuDepositResult {
         const assetsValue = BigInt(amount);
 
         // Get the underlying asset address for approval
-        const assetAddress = await contract.asset();
+        const assetAddressRaw = await contract.asset();
+        // contract.asset() returns a BigInt (felt252) — convert to hex string
+        const assetAddress =
+          typeof assetAddressRaw === "string"
+            ? assetAddressRaw
+            : "0x" + assetAddressRaw.toString(16);
 
-        // Approve the vToken contract to spend the underlying asset
+        // Check actual token balance — the received amount may differ from
+        // the stored collateralAmount due to swap fees/slippage.
         const assetContract = new Contract(vTokenABI, assetAddress, starknetAccount);
-        const approveResult = await assetContract.approve(vTokenAddress, assetsValue);
-        await provider.waitForTransaction(approveResult.transaction_hash);
+        const balanceRaw = await assetContract.balanceOf(starknetAccount.address);
+        const balance = BigInt(balanceRaw.toString());
+
+        if (balance === 0n) {
+          throw new Error(
+            "No token balance available to deposit. The swap may not have completed yet."
+          );
+        }
+
+        // Use the lesser of requested amount and actual balance
+        const depositAmount = assetsValue > balance ? balance : assetsValue;
+
+        // Only approve if current allowance is insufficient
+        const allowanceRaw = await assetContract.allowance(starknetAccount.address, vTokenAddress);
+        const allowance = BigInt(allowanceRaw.toString());
+        if (allowance < depositAmount) {
+          const approveResult = await assetContract.approve(vTokenAddress, depositAmount);
+          await provider.waitForTransaction(approveResult.transaction_hash);
+        }
 
         // Deposit assets into the vToken vault
         const receiver = starknetAccount.address;
-        const result = await contract.deposit(assetsValue, receiver);
+        const result = await contract.deposit(depositAmount, receiver);
         await provider.waitForTransaction(result.transaction_hash);
 
         return result.transaction_hash;

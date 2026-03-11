@@ -56,6 +56,7 @@ export type BridgeRepository = {
       depositAddress: string | null;
       supplyTxId: string | null;
       borrowTxId: string | null;
+      depositParams: DepositParams | null;
     }>
   ): Promise<BridgeOrder>;
 };
@@ -197,6 +198,7 @@ export class PgBridgeRepository implements BridgeRepository {
       depositAddress: string | null;
       supplyTxId: string | null;
       borrowTxId: string | null;
+      depositParams: DepositParams | null;
     }>
   ): Promise<BridgeOrder> {
     const current = await this.getOrderById(id);
@@ -215,6 +217,7 @@ export class PgBridgeRepository implements BridgeRepository {
       depositAddress: patch.depositAddress ?? current.depositAddress,
       supplyTxId: patch.supplyTxId ?? current.supplyTxId,
       borrowTxId: patch.borrowTxId ?? current.borrowTxId,
+      depositParams: patch.depositParams !== undefined ? patch.depositParams : current.depositParams,
     };
 
     const result = await this.pool.query<BridgeOrderRow>(
@@ -231,6 +234,7 @@ export class PgBridgeRepository implements BridgeRepository {
         deposit_address = $9,
         supply_tx_id = $10,
         borrow_tx_id = $11,
+        deposit_params = $12,
         updated_at = NOW()
       WHERE id = $1
       RETURNING *
@@ -247,6 +251,7 @@ export class PgBridgeRepository implements BridgeRepository {
         next.depositAddress,
         next.supplyTxId,
         next.borrowTxId,
+        next.depositParams ? JSON.stringify(next.depositParams) : null,
       ]
     );
 

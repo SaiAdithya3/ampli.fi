@@ -1,6 +1,6 @@
 import { log } from "../logger.js";
 import { BridgeRepository } from "./repository.js";
-import { BridgeCreateOrderInput, BridgeOrder, BridgeOrderAction, BridgeOrderPage, BridgeOrderStatus } from "./types.js";
+import { BridgeCreateOrderInput, BridgeOrder, BridgeOrderAction, BridgeOrderPage, BridgeOrderStatus, DepositParams } from "./types.js";
 
 const MAX_LIST_LIMIT = 100;
 
@@ -105,6 +105,13 @@ export class BridgeService {
     const order = await this.requireOrder(orderId);
     log.info("bridge linkBorrowTx", { orderId, borrowTxId });
     return this.repository.updateOrder(order.id, { borrowTxId });
+  }
+
+  async updateDepositParams(orderId: string, patch: Partial<DepositParams>): Promise<BridgeOrder> {
+    const order = await this.requireOrder(orderId);
+    const merged: DepositParams = { ...order.depositParams!, ...patch };
+    log.info("bridge updateDepositParams", { orderId, patch });
+    return this.repository.updateOrder(order.id, { depositParams: merged });
   }
 
   private async requireOrder(orderId: string): Promise<BridgeOrder> {

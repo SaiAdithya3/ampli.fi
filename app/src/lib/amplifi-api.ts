@@ -263,7 +263,17 @@ export interface BridgeOrder {
   sourceTxId: string | null;
   destinationTxId: string | null;
   lastError: string | null;
-  depositParams: { vTokenAddress: string; collateralAmount: string; decimals: number } | null;
+  depositParams: {
+    vTokenAddress: string;
+    collateralAmount: string;
+    decimals: number;
+    debtAssetAddress?: string;
+    borrowAmount?: string;
+    debtDecimals?: number;
+    collateralAssetAddress?: string;
+    poolId?: string;
+    poolAddress?: string;
+  } | null;
   supplyTxId: string | null;
   borrowTxId: string | null;
   createdAt: string;
@@ -279,7 +289,17 @@ export interface CreateOrderBody {
   walletAddress: string;
   bitcoinAddress?: string;
   action?: "swap" | "borrow" | "stake";
-  depositParams?: { vTokenAddress: string; collateralAmount: string; decimals: number };
+  depositParams?: {
+    vTokenAddress: string;
+    collateralAmount: string;
+    decimals: number;
+    debtAssetAddress?: string;
+    borrowAmount?: string;
+    debtDecimals?: number;
+    collateralAssetAddress?: string;
+    poolId?: string;
+    poolAddress?: string;
+  };
 }
 
 export async function createOrder(
@@ -346,6 +366,21 @@ export async function updateSupplyTx(orderId: string, supplyTxId: string): Promi
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err?.error ?? `Update supply tx failed: ${res.status}`);
+  }
+}
+
+export async function updateDepositParams(
+  orderId: string,
+  patch: Record<string, string | undefined>
+): Promise<void> {
+  const res = await fetch(`${API_URL}/api/bridge/orders/${encodeURIComponent(orderId)}/deposit-params`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error ?? `Update deposit params failed: ${res.status}`);
   }
 }
 
