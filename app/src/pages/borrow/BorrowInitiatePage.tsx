@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { LoanStatusPanel } from "@/components/borrow/LoanStatusPanel";
 import { OrderSummaryReadOnly } from "@/components/borrow/OrderSummaryReadOnly";
@@ -53,65 +53,75 @@ export function BorrowInitiatePage() {
   const locationState = location.state as OrderPageState | undefined;
   const [order, setOrder] = useState<BridgeOrder | null>(null);
   const [summary, setSummary] = useState<OrderPageState | null>(locationState ?? null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const isSendingBtc = step !== "idle" && step !== "settled" && step !== "error";
 
+  const buildSummaryFromOrder = useCallback(async (o: BridgeOrder, cancelled: { current: boolean }) => {
+    const amt = Number(o.amount) || 0;
+    const btcEquivalent = amt / 1e8;
+    let supplyUsd = o.amountSource ? Number(o.amountSource) : 0;
+    let borrowUsd = o.amountDestination ? Number(o.amountDestination) : 0;
+    let ltvPct = supplyUsd > 0 ? Math.round((borrowUsd / supplyUsd) * 100) : 50;
+    if (supplyUsd <= 0 && btcEquivalent > 0) {
+      try {
+        const offers = await getLoanOffers({
+          collateral: "WBTC",
+          borrow: "USDC",
+          borrowUsd: 1000,
+          targetLtv: 0.5,
+          limit: 1,
+        });
+        const q = offers.data[0]?.data?.quote;
+        if (q?.requiredCollateralAmount && q.requiredCollateralAmount > 0) {
+          const btcPriceUsd = q.requiredCollateralUsd / q.requiredCollateralAmount;
+          supplyUsd = btcEquivalent * btcPriceUsd;
+          borrowUsd = supplyUsd * (ltvPct / 100);
+        }
+      } catch {
+        supplyUsd = btcEquivalent * 70000;
+        borrowUsd = supplyUsd * 0.5;
+        ltvPct = 50;
+      }
+    }
+    if (!cancelled.current) {
+      setSummary({
+        supplyAmountUsd: supplyUsd || 1,
+        borrowAmountUsd: borrowUsd,
+        btcEquivalent,
+        ltvPct,
+        borrowSymbol: "USDC",
+      });
+    }
+  }, []);
+
   useEffect(() => {
     if (!orderId) return;
-    let cancelled = false;
+    const cancelled = { current: false };
+    setFetchError(null);
     getOrder(orderId)
       .then(async (res) => {
-        if (!cancelled && res.data) {
+        if (cancelled.current) return;
+        if (res.data) {
           setOrder(res.data);
           if (!locationState) {
-            const o = res.data;
-            const amt = Number(o.amount) || 0;
-            const btcEquivalent = amt / 1e8;
-            let supplyUsd = o.amountSource ? Number(o.amountSource) : 0;
-            let borrowUsd = o.amountDestination ? Number(o.amountDestination) : 0;
-            let ltvPct = supplyUsd > 0 ? Math.round((borrowUsd / supplyUsd) * 100) : 50;
-            if (supplyUsd <= 0 && btcEquivalent > 0) {
-              try {
-                const offers = await getLoanOffers({
-                  collateral: "WBTC",
-                  borrow: "USDC",
-                  borrowUsd: 1000,
-                  targetLtv: 0.5,
-                  limit: 1,
-                });
-                const q = offers.data[0]?.data?.quote;
-                if (q?.requiredCollateralAmount && q.requiredCollateralAmount > 0) {
-                  const btcPriceUsd = q.requiredCollateralUsd / q.requiredCollateralAmount;
-                  supplyUsd = btcEquivalent * btcPriceUsd;
-                  borrowUsd = supplyUsd * (ltvPct / 100);
-                }
-              } catch {
-                supplyUsd = btcEquivalent * 70000;
-                borrowUsd = supplyUsd * 0.5;
-                ltvPct = 50;
-              }
-            }
-            if (!cancelled) {
-              setSummary({
-                supplyAmountUsd: supplyUsd || 1,
-                borrowAmountUsd: borrowUsd,
-                btcEquivalent,
-                ltvPct,
-                borrowSymbol: "USDC",
-              });
-            }
+            await buildSummaryFromOrder(res.data, cancelled);
           }
         }
       })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [orderId, locationState]);
+      .catch((e) => {
+        if (!cancelled.current) {
+          setFetchError(e instanceof Error ? e.message : "Failed to load order");
+        }
+      });
+    return () => { cancelled.current = true; };
+  }, [orderId, locationState, buildSummaryFromOrder]);
 
-  if (!orderId) {
+  if (!orderId || fetchError) {
     return (
       <div className="relative mx-auto w-full max-w-[1400px] min-w-0 py-6 px-4 sm:py-8 sm:px-0">
         <div className="rounded-amplifi-lg bg-white p-6">
-          <p className="text-sm text-red-600">Invalid order.</p>
+          <p className="text-sm text-red-600">{fetchError ?? "Invalid order."}</p>
           <button
             type="button"
             onClick={() => navigate("/borrow")}

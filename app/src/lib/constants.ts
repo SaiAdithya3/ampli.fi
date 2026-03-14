@@ -2,11 +2,14 @@
  * Starkzap + Privy + App Configuration
  */
 
-export const NETWORK = (import.meta.env.VITE_NETWORK || "sepolia") as
-  | "mainnet"
-  | "sepolia";
+export enum Network {
+  MAINNET = 'mainnet',
+  TESTNET = 'testnet',
+}
 
-export const IS_MAINNET = NETWORK === "mainnet";
+export const NETWORK = (import.meta.env.VITE_NETWORK || Network.TESTNET) as Network;
+
+export const IS_MAINNET = NETWORK === Network.MAINNET;
 
 export const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:6969").replace(
   /\/+$/,
@@ -30,7 +33,7 @@ export const BTC_EXPLORER_BASE = IS_MAINNET
 
 /** Starknet tx explorer (Sepolia or mainnet). */
 export const STARKNET_EXPLORER_BASE =
-  NETWORK === "mainnet"
+  NETWORK === Network.MAINNET
     ? "https://voyager.online/"
     : "https://sepolia.voyager.online";
 
@@ -64,6 +67,16 @@ export const ASSET_ICONS = {
   ETH: "https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png",
   USDC: "https://s2.coinmarketcap.com/static/img/coins/64x64/3408.png",
   STRK: "https://starknet.io/favicon.ico",
+} as const;
+
+export const WALLET_ICONS = {
+  xverse: "https://ik.imagekit.io/thecirclecompany/wallets/xverse.svg",
+  unisat: "https://ik.imagekit.io/thecirclecompany/wallets/unisat.svg",
+  braavos: "https://ik.imagekit.io/thecirclecompany/wallets/braavos.svg",
+  argentX: "https://ik.imagekit.io/thecirclecompany/wallets/argent.svg",
+  keplr: "https://ik.imagekit.io/thecirclecompany/wallets/keplr.png",
+  okxwallet: "https://ik.imagekit.io/thecirclecompany/wallets/okx.svg",
+  privy: "https://ik.imagekit.io/thecirclecompany/wallets/privy.png",
 } as const;
 
 export const POOL_ICONS = {

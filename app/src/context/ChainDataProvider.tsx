@@ -1,15 +1,11 @@
-import { useMemo, useEffect } from "react";
+import { useMemo } from "react";
 import { ChainDataContext } from "./ChainDataContext";
 import { useWallet } from "@/store/useWallet";
+import { useConnectModal } from "./ConnectModalContext";
 
 export function ChainDataProvider({ children }: { children: React.ReactNode }) {
-  const { starknetAccount, starknetWalletName, connectStarknet, starknetAddress, tryRestoreStarknetAccount } = useWallet();
-
-  useEffect(() => {
-    if (starknetAddress && !starknetAccount) {
-      tryRestoreStarknetAccount();
-    }
-  }, [starknetAddress, starknetAccount, tryRestoreStarknetAccount]);
+  const { starknetAccount, starknetWalletName } = useWallet();
+  const { open } = useConnectModal();
 
   const contextValue = useMemo(() => {
     return {
@@ -26,11 +22,11 @@ export function ChainDataProvider({ children }: { children: React.ReactNode }) {
               instance: starknetAccount,
             },
             id: "STARKNET",
-            connect: connectStarknet,
+            connect: open,
           }
         : undefined,
     };
-  }, [starknetAccount, starknetWalletName, connectStarknet]);
+  }, [starknetAccount, starknetWalletName, open]);
 
   return (
     <ChainDataContext.Provider value={contextValue}>

@@ -1,9 +1,11 @@
+import { useNavigate } from "react-router-dom";
 import { SwapForm } from "@/components/swap/SwapForm";
 import { SwapStatusPanel } from "@/components/swap/SwapStatusPanel";
 import { useAtomiqSwap } from "@/hooks/useAtomiqSwap";
 import { useConnectModal } from "@/context/ConnectModalContext";
 
 export function SwapPage() {
+  const navigate = useNavigate();
   const { open } = useConnectModal();
   const {
     isInitialized,

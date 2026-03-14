@@ -1,5 +1,5 @@
 import { createContext } from "react";
-import type { WalletAccount } from "starknet";
+import type { AccountInterface } from "starknet";
 
 export type ChainWalletData<T> = {
   chain: {
@@ -20,5 +20,5 @@ export type ChainWalletData<T> = {
 export type ChainIdentifiers = "STARKNET";
 
 export const ChainDataContext = createContext<{
-  STARKNET?: ChainWalletData<WalletAccount>;
+  STARKNET?: ChainWalletData<AccountInterface>;
 }>({});

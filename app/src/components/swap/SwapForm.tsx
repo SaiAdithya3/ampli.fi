@@ -216,8 +216,8 @@ export function SwapForm({
       dstToken,
       amountBtc,
       action: "swap",
-    }).catch(() => {
-      // Errors logged in hook
+    }).catch((e) => {
+      console.error("[SwapForm] Swap failed:", e);
     });
   }, [canSwap, runSwap, dstToken, amountBtc]);
 
@@ -398,7 +398,7 @@ export function SwapForm({
           variant="primary"
           size="lg"
           className="w-full"
-          disabled={!canSwap}
+          disabled={connected ? !canSwap : false}
           onClick={connected ? handleSwap : onConnectWallet}
         >
           {isSwapping

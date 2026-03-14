@@ -102,16 +102,14 @@ async function getStakingInstance(poolAddress: string): Promise<Staking> {
 
 export function useStake(): UseStakeResult {
   const getStarkzapWallet = useStarkzapWallet();
-  const { starknetAccount, starknetSource, privyStarkzapWallet } = useWallet();
+  const { starknetAccount } = useWallet();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedTokenBalance, setSelectedTokenBalance] = useState<string | null>(
     null
   );
 
-  const hasEarnWallet = Boolean(
-    starknetAccount || (starknetSource === "privy" && privyStarkzapWallet != null)
-  );
+  const hasEarnWallet = Boolean(starknetAccount);
 
   const refreshBalance = useCallback(
     async (token: Token | null) => {

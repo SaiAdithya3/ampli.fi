@@ -634,11 +634,9 @@ function BtcStakeForm({
   isBest: boolean;
   onBack: () => void;
 }) {
-  const { bitcoinPaymentAddress, starknetAddress, starknetAccount, starknetSource } =
+  const { bitcoinPaymentAddress, starknetAddress, starknetAccount } =
     useWallet();
-  const hasStarknet = Boolean(
-    starknetAccount?.address || (starknetSource === "privy" && starknetAddress)
-  );
+  const hasStarknet = Boolean(starknetAccount?.address || starknetAddress);
   const hasBtc = Boolean(bitcoinPaymentAddress);
   const bothConnected = hasStarknet && hasBtc;
 
@@ -990,10 +988,8 @@ function NativeStakeForm({
   isBest: boolean;
   onBack: () => void;
 }) {
-  const { starknetAccount, starknetSource, starknetAddress, privyStarkzapWallet } = useWallet();
-  const hasStarknetConnected = Boolean(
-    starknetAccount?.address || (starknetSource === "privy" && starknetAddress)
-  );
+  const { starknetAccount, starknetAddress } = useWallet();
+  const hasStarknetConnected = Boolean(starknetAccount?.address || starknetAddress);
 
   const {
     isSubmitting,
@@ -1024,7 +1020,7 @@ function NativeStakeForm({
     if (hasStarknetConnected) {
       refreshBalance(tokenObj as never).catch(() => {});
     }
-  }, [hasStarknetConnected, refreshBalance, tokenObj, starknetAddress, privyStarkzapWallet]);
+  }, [hasStarknetConnected, refreshBalance, tokenObj, starknetAddress]);
 
   useEffect(() => {
     if (!toastMessage) return;
@@ -1213,10 +1209,8 @@ function EndurStakeForm({
   isBest: boolean;
   onBack: () => void;
 }) {
-  const { starknetAccount, starknetSource, starknetAddress } = useWallet();
-  const hasWallet = Boolean(
-    starknetAccount?.address || (starknetSource === "privy" && starknetAddress)
-  );
+  const { starknetAccount, starknetAddress } = useWallet();
+  const hasWallet = Boolean(starknetAccount?.address || starknetAddress);
 
   const {
     pool: endurPool,

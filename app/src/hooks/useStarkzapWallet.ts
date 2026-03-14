@@ -6,20 +6,16 @@ import { useWallet } from "@/store/useWallet";
 
 /**
  * Returns a getter for the current Starkzap wallet used for Earn (balance + stake).
- * Works for both extension (ArgentX/Braavos) and Privy-connected wallets.
+ * Uses extension wallet (Argent, Braavos, etc.) from @starknet-react/core.
  */
 export function useStarkzapWallet() {
   const chainData = useContext(ChainDataContext);
   const extensionAccount = chainData.STARKNET?.wallet?.instance;
-  const { starknetSource, privyStarkzapWallet } = useWallet();
 
   return useCallback(async (): Promise<WalletInterface> => {
-    if (starknetSource === "privy" && privyStarkzapWallet != null) {
-      return privyStarkzapWallet as unknown as WalletInterface;
-    }
     if (extensionAccount) {
       return InjectedStarkzapWallet.fromAccount(extensionAccount as never) as unknown as WalletInterface;
     }
     throw new Error("Connect your Starknet wallet to continue");
-  }, [starknetSource, privyStarkzapWallet, extensionAccount]);
+  }, [extensionAccount]);
 }
