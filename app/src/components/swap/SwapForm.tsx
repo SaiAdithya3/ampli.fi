@@ -49,7 +49,7 @@ function formatUsd(usd: number): string {
   return "$" + usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-const QUOTE_REFRESH_MS = 10_000;
+const QUOTE_REFRESH_MS = 30_000; // Reduced from 10s to limit RPC usage
 
 export interface SwapFormProps {
   isInitialized: boolean;
@@ -216,8 +216,8 @@ export function SwapForm({
       dstToken,
       amountBtc,
       action: "swap",
-    }).catch(() => {
-      // Errors logged in hook
+    }).catch((e) => {
+      console.error("[SwapForm] Swap failed:", e);
     });
   }, [canSwap, runSwap, dstToken, amountBtc]);
 
@@ -398,7 +398,7 @@ export function SwapForm({
           variant="primary"
           size="lg"
           className="w-full"
-          disabled={!canSwap}
+          disabled={connected ? !canSwap : false}
           onClick={connected ? handleSwap : onConnectWallet}
         >
           {isSwapping

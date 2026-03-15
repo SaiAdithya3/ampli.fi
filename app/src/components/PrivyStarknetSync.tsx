@@ -1,36 +1,27 @@
 import { useEffect } from "react";
-import { usePrivyStarknet } from "@/hooks/usePrivyStarknet";
+import { usePrivyStarknetContext } from "@/context/PrivyStarknetContext";
 import { useWallet } from "@/store/useWallet";
 
 /**
  * Syncs Privy+Starkzap wallet state to the global wallet store.
- * When user is authenticated with Privy and wallet is ready, we call connectPrivyStarknet
- * and set the starkzap wallet for Earn page (balance + stake).
+ * Uses context from PrivyStarknetProvider (single source of truth) to avoid duplicate setup.
  */
 export function PrivyStarknetSync() {
-  const { wallet, walletAddress, starknetSigner, isReady, isAuthenticated } =
-    usePrivyStarknet();
-  const { connectPrivyStarknet, disconnectPrivyStarknet, setPrivyStarkzapWallet, starknetSource } =
+  const ctx = usePrivyStarknetContext();
+  const { connectPrivyStarknet, disconnectPrivyStarknet, starknetSource } =
     useWallet();
 
   useEffect(() => {
-    if (isReady && walletAddress && starknetSigner) {
-      connectPrivyStarknet(walletAddress, starknetSigner);
-    }
-  }, [isReady, walletAddress, starknetSigner, connectPrivyStarknet]);
+    if (!ctx?.isReady || !ctx?.walletAddress || !ctx?.starknetSigner) return;
+    connectPrivyStarknet(ctx.walletAddress, ctx.starknetSigner);
+  }, [ctx?.isReady, ctx?.walletAddress, ctx?.starknetSigner, connectPrivyStarknet]);
 
   useEffect(() => {
-    if (isReady && wallet) {
-      setPrivyStarkzapWallet(wallet);
-    }
-  }, [isReady, wallet, setPrivyStarkzapWallet]);
-
-  useEffect(() => {
-    if (!isAuthenticated && starknetSource === "privy") {
-      setPrivyStarkzapWallet(null);
+    if (!ctx) return;
+    if (!ctx.isAuthenticated && starknetSource === "privy") {
       disconnectPrivyStarknet();
     }
-  }, [isAuthenticated, starknetSource, disconnectPrivyStarknet, setPrivyStarkzapWallet]);
+  }, [ctx?.isAuthenticated, starknetSource, disconnectPrivyStarknet]);
 
   return null;
 }

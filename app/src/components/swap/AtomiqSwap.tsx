@@ -34,8 +34,8 @@ export function AtomiqSwap() {
     !isSwapping;
 
   const handleSwap = () => {
-    runSwap({ dstToken, amountBtc }).catch(() => {
-      // Errors are already logged internally by the hook
+    runSwap({ dstToken, amountBtc }).catch((e) => {
+      console.error("[AtomiqSwap] Swap failed:", e);
     });
   };
 

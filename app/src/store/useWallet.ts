@@ -1,32 +1,14 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { BitcoinNetwork } from "@atomiqlabs/sdk";
-import {
-  RpcProviderWithRetries,
-  StarknetSigner,
-} from "@atomiqlabs/chain-starknet";
-import { connect, disconnect } from "@starknet-io/get-starknet";
-import { WalletAccount } from "starknet";
+import { StarknetSigner } from "@atomiqlabs/chain-starknet";
+import { AccountInterface } from "starknet";
 import { XverseBitcoinWallet } from "@/lib/bitcoin/XverseBitcoinWallet";
 import { UnisatBitcoinWallet } from "@/lib/bitcoin/UnisatBitcoinWallet";
 
-import { API_URL, RPC_URL as STARKNET_RPC_URL, IS_MAINNET } from "@/lib/constants";
+import { API_URL, IS_MAINNET } from "@/lib/constants";
 const BITCOIN_NETWORK = IS_MAINNET ? BitcoinNetwork.MAINNET : BitcoinNetwork.TESTNET4;
 const BITCOIN_RPC_URL = `${API_URL}/api/mempool/`;
-
-interface StarknetProvider {
-  enable?: () => Promise<void>;
-  accounts?: string[];
-  selectedAddress?: string;
-}
-
-interface WindowWithProviders {
-  starknet?: StarknetProvider;
-  starknet_argentX?: StarknetProvider;
-  starknet_braavos?: StarknetProvider;
-  btc?: unknown;
-  BitcoinProvider?: unknown;
-}
 
 type BitcoinWalletInstance =
   | XverseBitcoinWallet
@@ -35,12 +17,7 @@ type BitcoinWalletInstance =
 
 export type StarknetSource = "extension" | "privy" | null;
 
-/** Starkzap wallet instance when connected via Privy (in-memory, not persisted). */
-type PrivyStarkzapWallet = unknown;
-
 type WalletState = {
-  isXverseAvailable: boolean;
-  isUniSatAvailable: boolean;
   isConnecting: boolean;
   connected: boolean;
   bitcoinPaymentAddress: string | null;
@@ -52,29 +29,30 @@ type WalletState = {
   bitcoinWalletInstance: BitcoinWalletInstance;
   starknetSigner: StarknetSigner | null;
   /** Raw Starknet account for earn/staking (starkzap); set when connecting via extension. */
-  starknetAccount: WalletAccount | null;
-  /** Starkzap wallet when connected via Privy; used for balance/stake on Earn page (not persisted). */
-  privyStarkzapWallet: PrivyStarkzapWallet | null;
+  starknetAccount: AccountInterface | null;
 
-  detectProviders: () => void;
-  connectBitcoin: (walletType: "xverse" | "unisat") => Promise<void>;
-  connectStarknet: () => Promise<void>;
+  connectBitcoin: (walletId: string) => Promise<void>;
+  /** Called by PrivyStarknetSync when Privy wallet is ready. */
   connectPrivyStarknet: (address: string, signer: StarknetSigner) => void;
-  setPrivyStarkzapWallet: (wallet: PrivyStarkzapWallet | null) => void;
-  disconnectBitcoin: () => void;
-  disconnectStarknet: () => Promise<void>;
+  /** Called by StarknetSync when @starknet-react/core reports connected. */
+  connectStarknetFromExtension: (
+    address: string,
+    signer: StarknetSigner,
+    account: AccountInterface,
+    walletName: string
+  ) => void;
+  /** Called by StarknetSync when @starknet-react/core reports disconnected. */
+  disconnectStarknetFromExtension: () => void;
+  /** Called when user logs out of Privy. */
   disconnectPrivyStarknet: () => void;
-  /** Restore starknetAccount after refresh when we have starknetAddress (extension only). */
-  tryRestoreStarknetAccount: () => Promise<void>;
-  /** Reconnect wallets when we have persisted types/addresses but missing instances (onesat pattern). */
+  disconnectBitcoin: () => void;
+  /** Reconnect Bitcoin when we have persisted type but missing instance. */
   reconnectWallets: () => Promise<void>;
 };
 
 export const useWallet = create<WalletState>()(
   persist(
     (set, get) => ({
-      isXverseAvailable: false,
-      isUniSatAvailable: false,
       isConnecting: false,
       connected: false,
       bitcoinPaymentAddress: null,
@@ -85,27 +63,20 @@ export const useWallet = create<WalletState>()(
       bitcoinWalletInstance: null,
       starknetSigner: null,
       starknetAccount: null,
-      privyStarkzapWallet: null,
 
-      detectProviders: () => {
-        if (typeof window === "undefined") return;
-        const win = window as Window &
-          WindowWithProviders & { unisat?: unknown };
-        const hasXverse = Boolean(win.btc || win.BitcoinProvider);
-        const hasUnisat = Boolean(win.unisat);
-        set({ isXverseAvailable: hasXverse, isUniSatAvailable: hasUnisat });
-      },
-
-      connectBitcoin: async (walletType: "xverse" | "unisat") => {
+      connectBitcoin: async (walletId: string) => {
         const current = get();
         if (current.isConnecting) return;
         if (current.bitcoinWalletInstance && current.bitcoinPaymentAddress) return;
+        if (walletId !== "xverse" && walletId !== "unisat") {
+          throw new Error("This wallet is not yet supported for swap");
+        }
 
         try {
           set({ isConnecting: true });
 
           const wallet =
-            walletType === "xverse"
+            walletId === "xverse"
               ? await XverseBitcoinWallet.connect(
                   BITCOIN_NETWORK,
                   BITCOIN_RPC_URL
@@ -118,64 +89,13 @@ export const useWallet = create<WalletState>()(
           const address = wallet.getReceiveAddress();
           set({
             bitcoinPaymentAddress: address,
-            bitcoinWalletType: walletType,
+            bitcoinWalletType: walletId,
             bitcoinWalletInstance: wallet,
             connected: true,
             isConnecting: false,
           });
         } catch (error) {
-          console.error(`Failed to connect ${walletType}:`, error);
-          set({ isConnecting: false });
-          throw error;
-        }
-      },
-
-      connectStarknet: async () => {
-        const current = get();
-        if (current.isConnecting) return;
-        if (current.starknetAddress) return;
-
-        try {
-          set({ isConnecting: true });
-          const swo = await connect({
-            modalMode: "alwaysAsk",
-            modalTheme: "light",
-          });
-
-          if (!swo) {
-            throw new Error("Failed to connect Starknet wallet");
-          }
-
-          const walletAccount = await WalletAccount.connect(
-            new RpcProviderWithRetries({ nodeUrl: STARKNET_RPC_URL }),
-            swo
-          );
-
-          let addr = walletAccount.address;
-          for (let i = 0; i < 50; i++) {
-            if (
-              addr &&
-              addr !==
-                "0x0000000000000000000000000000000000000000000000000000000000000000"
-            ) {
-              break;
-            }
-            await new Promise((r) => setTimeout(r, 100));
-            addr = walletAccount.address;
-          }
-
-          const signer = new StarknetSigner(walletAccount);
-          set({
-            starknetAddress: addr,
-            starknetWalletName: swo.name,
-            starknetSource: "extension",
-            starknetSigner: signer,
-            starknetAccount: walletAccount,
-            connected: true,
-            isConnecting: false,
-          });
-        } catch (error) {
-          console.error("Failed to connect Starknet:", error);
+          console.error(`Failed to connect ${walletId}:`, error);
           set({ isConnecting: false });
           throw error;
         }
@@ -187,30 +107,24 @@ export const useWallet = create<WalletState>()(
           starknetWalletName: "Privy",
           starknetSource: "privy",
           starknetSigner: signer,
+          starknetAccount: null,
           connected: true,
         });
       },
 
-      setPrivyStarkzapWallet: (wallet) => {
-        set({ privyStarkzapWallet: wallet });
-      },
-
-      disconnectBitcoin: () => {
+      connectStarknetFromExtension: (address, signer, account, walletName) => {
         set({
-          bitcoinPaymentAddress: null,
-          bitcoinWalletType: null,
-          bitcoinWalletInstance: null,
-          connected: Boolean(get().starknetAddress),
+          starknetAddress: address,
+          starknetWalletName: walletName,
+          starknetSource: "extension",
+          starknetSigner: signer,
+          starknetAccount: account,
+          connected: true,
         });
       },
 
-      disconnectStarknet: async () => {
+      disconnectStarknetFromExtension: () => {
         if (get().starknetSource === "privy") return;
-        try {
-          await disconnect({ clearLastWallet: true });
-        } catch {
-          // ignore
-        }
         set({
           starknetAddress: null,
           starknetWalletName: null,
@@ -229,80 +143,52 @@ export const useWallet = create<WalletState>()(
           starknetSource: null,
           starknetSigner: null,
           starknetAccount: null,
-          privyStarkzapWallet: null,
           connected: Boolean(get().bitcoinPaymentAddress),
         });
       },
 
-      tryRestoreStarknetAccount: async () => {
-        const current = get();
-        if (current.starknetAccount) return;
-        if (!current.starknetAddress) return;
-        if (current.starknetSource === "privy") return;
-        try {
-          const swo = await connect({ modalMode: "neverAsk" });
-          if (!swo) return;
-          const walletAccount = await WalletAccount.connect(
-            new RpcProviderWithRetries({ nodeUrl: STARKNET_RPC_URL }),
-            swo
-          );
-          const signer = new StarknetSigner(walletAccount);
-          set({
-            starknetWalletName: swo.name,
-            starknetSource: "extension",
-            starknetSigner: signer,
-            starknetAccount: walletAccount,
-          });
-        } catch {
-          // ignore
-        }
+      disconnectBitcoin: () => {
+        set({
+          bitcoinPaymentAddress: null,
+          bitcoinWalletType: null,
+          bitcoinWalletInstance: null,
+          connected: Boolean(get().starknetAddress),
+        });
       },
 
       reconnectWallets: async () => {
         const s = get();
-        try {
-          if (s.bitcoinWalletType && !s.bitcoinWalletInstance) {
+        if (s.bitcoinWalletType && !s.bitcoinWalletInstance) {
+          try {
             await get().connectBitcoin(s.bitcoinWalletType);
+          } catch (e) {
+            console.warn("[reconnectWallets] Bitcoin reconnect failed:", e);
           }
-          const afterBtc = get();
-          if (
-            afterBtc.starknetAddress &&
-            !afterBtc.starknetSigner &&
-            afterBtc.starknetSource === "extension"
-          ) {
-            await get().tryRestoreStarknetAccount();
-          }
-        } catch {
-          // ignore
         }
+        // Starknet: @starknet-react/core autoConnect handles reconnect; no need to retry here
       },
     }),
     {
       name: "amplifi-wallet",
       partialize: (state) => ({
         bitcoinPaymentAddress: state.bitcoinPaymentAddress,
-        starknetAddress: state.starknetAddress,
         bitcoinWalletType: state.bitcoinWalletType,
-        starknetWalletName: state.starknetWalletName,
-        starknetSource: state.starknetSource,
         connected: state.connected,
       }),
       onRehydrateStorage: () => (state, err) => {
-        if (err || typeof window === "undefined") return;
-        if (!state) return;
-        // Defer to next tick to avoid "Cannot access 'useWallet' before initialization"
+        if (err) {
+          console.warn("[useWallet] Rehydration error:", err);
+          return;
+        }
+        if (typeof window === "undefined" || !state) return;
         setTimeout(() => {
           const store = useWallet.getState();
           if (store.bitcoinWalletType && !store.bitcoinWalletInstance) {
-            store.connectBitcoin(store.bitcoinWalletType).catch(() => {});
+            store.connectBitcoin(store.bitcoinWalletType).catch((e) => {
+              console.warn("[useWallet] Rehydrate BTC connect failed:", e);
+            });
           }
-          if (
-            store.starknetAddress &&
-            !store.starknetSigner &&
-            store.starknetSource === "extension"
-          ) {
-            store.tryRestoreStarknetAccount().catch(() => {});
-          }
+          // Starknet: @starknet-react/core autoConnect handles reconnect
         }, 0);
       },
     }

@@ -2,6 +2,7 @@ import { hash } from "starknet";
 import type { EarnProtocolAdapter } from "./protocols.js";
 import type { EarnHistoryEntry, EarnHistoryType, EarnPool, EarnPosition, EarnToken } from "../../types/earn.js";
 import { settings } from "../settings.js";
+import { rpcCall as rpcCallThrottled } from "../rpc/client.js";
 
 const PROTOCOL = "endur";
 
@@ -58,33 +59,8 @@ function formatUnits(value: bigint, decimals: number): string {
 
 type RpcCallResult = string[];
 
-async function rpcCall<T>(method: string, params: unknown[]): Promise<T> {
-  const res = await fetch(settings.rpc_url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: Date.now(),
-      method,
-      params,
-    }),
-  });
-
-  const payload = (await res.json().catch(() => ({}))) as {
-    result?: T;
-    error?: { message?: string };
-  };
-
-  if (!res.ok || payload.error) {
-    const message = payload.error?.message || `RPC call failed (${res.status})`;
-    throw new Error(message);
-  }
-
-  return payload.result as T;
-}
-
 async function starknetCall(contractAddress: string, selector: string, calldata: string[] = []): Promise<string[]> {
-  return rpcCall<RpcCallResult>("starknet_call", [
+  return rpcCallThrottled<RpcCallResult>(settings.rpc_url, "starknet_call", [
     {
       contract_address: contractAddress,
       entry_point_selector: selector,
@@ -95,12 +71,13 @@ async function starknetCall(contractAddress: string, selector: string, calldata:
 }
 
 async function getLatestBlockNumber(): Promise<number> {
-  const latest = await rpcCall<number>("starknet_blockNumber", []);
+  const latest = await rpcCallThrottled<number>(settings.rpc_url, "starknet_blockNumber", []);
   return Number(latest);
 }
 
 async function getBlockTimestamp(blockNumber: number): Promise<number | null> {
-  const result = await rpcCall<{ timestamp?: number }>(
+  const result = await rpcCallThrottled<{ timestamp?: number }>(
+    settings.rpc_url,
     "starknet_getBlockWithTxHashes",
     [{ block_number: blockNumber }]
   );
@@ -207,15 +184,19 @@ async function getHistory(userAddress: string, opts?: { type?: string }): Promis
   let continuationToken: string | null = null;
 
   do {
-    const eventsResult: RpcEventsResponse = await rpcCall<RpcEventsResponse>("starknet_getEvents", [
-      {
-        from_block: { block_number: fromBlock },
-        to_block: { block_number: latestBlock },
-        address: xstrkAddress,
-        chunk_size: CHUNK_SIZE,
-        continuation_token: continuationToken,
-      },
-    ]);
+    const eventsResult: RpcEventsResponse = await rpcCallThrottled<RpcEventsResponse>(
+      settings.rpc_url,
+      "starknet_getEvents",
+      [
+        {
+          from_block: { block_number: fromBlock },
+          to_block: { block_number: latestBlock },
+          address: xstrkAddress,
+          chunk_size: CHUNK_SIZE,
+          continuation_token: continuationToken,
+        },
+      ]
+    );
 
     const events = eventsResult.events ?? [];
     for (const event of events) {

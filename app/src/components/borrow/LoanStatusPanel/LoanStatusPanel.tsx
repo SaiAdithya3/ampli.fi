@@ -85,6 +85,8 @@ export function LoanStatusPanel({
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout>;
 
+    const TERMINAL_STATUSES = ["FAILED", "EXPIRED", "REFUNDED"];
+
     const poll = async () => {
       if (cancelled || !orderId) return;
       try {
@@ -93,14 +95,15 @@ export function LoanStatusPanel({
         if (res.data) {
           setOrder(res.data);
           setError(res.data.lastError ?? null);
-          if (
-            res.data.status?.toUpperCase() === "SETTLED" &&
-            !settledFiredRef.current &&
-            onSettled
-          ) {
+          const status = res.data.status?.toUpperCase() ?? "";
+          if (status === "SETTLED" && !settledFiredRef.current && onSettled) {
             settledFiredRef.current = true;
             onSettled();
           }
+          // Stop polling on truly terminal statuses
+          if (TERMINAL_STATUSES.includes(status)) return;
+          // Stop polling on SETTLED if collateral deposit is done
+          if (status === "SETTLED" && res.data.supplyTxId) return;
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to fetch status");

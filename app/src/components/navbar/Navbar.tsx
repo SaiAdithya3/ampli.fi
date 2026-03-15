@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { NavLink } from "react-router-dom";
-import { LOGOS } from "@/lib/constants";
+import { LOGOS, ASSET_ICONS } from "@/lib/constants";
 import { useWallet } from "@/store/useWallet";
 
 export type TabId = "borrow" | "earn" | "swap" | "history";
@@ -19,14 +19,15 @@ function short(addr?: string | null, leading = 6, trailing = 4) {
 }
 
 interface NavbarProps {
-  onOpenConnect: () => void;
+  onOpenConnect: (view?: "bitcoin" | "starknet") => void;
 }
 
 export function Navbar({ onOpenConnect }: NavbarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const { isConnecting, connected, bitcoinPaymentAddress, starknetAddress } =
     useWallet();
-  const displayAddress = bitcoinPaymentAddress || starknetAddress;
+  const hasBtc = Boolean(bitcoinPaymentAddress);
+  const hasStarknet = Boolean(starknetAddress);
 
   // Close menu when switching to a larger viewport
   useEffect(() => {
@@ -48,6 +49,16 @@ export function Navbar({ onOpenConnect }: NavbarProps) {
     return () => {
       document.body.style.overflow = "";
     };
+  }, [menuOpen]);
+
+  // Close mobile menu on Escape key
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [menuOpen]);
 
   const navLinkClass = ({
@@ -105,9 +116,15 @@ export function Navbar({ onOpenConnect }: NavbarProps) {
             onOpenConnect();
             setMenuOpen(false);
           }}
-          className="rounded-[10px] border border-amplifi-border bg-amplifi-surface px-5 py-3 text-sm font-medium text-amplifi-text transition-colors hover:opacity-90"
+          className="inline-flex items-center justify-center gap-2 rounded-[10px] border border-amplifi-border bg-amplifi-surface px-4 py-2 text-amplifi-text transition-colors hover:opacity-90"
+          aria-label="Wallet connection"
         >
-          {short(displayAddress)}
+          {hasBtc && (
+            <img src={ASSET_ICONS.BTC} alt="Bitcoin" className="h-7 w-7" />
+          )}
+          {hasStarknet && (
+            <img src={ASSET_ICONS.STRK} alt="Starknet" className="h-7 w-7" />
+          )}
         </button>
       )}
     </>
@@ -195,7 +212,44 @@ export function Navbar({ onOpenConnect }: NavbarProps) {
             ))}
           </nav>
           <div className="mt-auto border-t border-amplifi-border p-4">
-            {connectButton}
+            {!connected ? (
+              connectButton
+            ) : (
+              <div
+                className={`flex gap-2 ${hasBtc && hasStarknet ? "grid grid-cols-2" : ""}`}
+              >
+                {hasBtc && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenConnect("bitcoin");
+                      setMenuOpen(false);
+                    }}
+                    className={`flex min-w-0 items-center gap-2 rounded-[10px] border border-amplifi-border bg-amplifi-surface px-3 py-2.5 text-left ${hasBtc && hasStarknet ? "" : "w-1/2"}`}
+                  >
+                    <img src={ASSET_ICONS.BTC} alt="Bitcoin" className="h-5 w-5 shrink-0" />
+                    <span className="truncate text-xs font-medium text-amplifi-text">
+                      {short(bitcoinPaymentAddress)}
+                    </span>
+                  </button>
+                )}
+                {hasStarknet && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenConnect("starknet");
+                      setMenuOpen(false);
+                    }}
+                    className={`flex min-w-0 items-center gap-2 rounded-[10px] border border-amplifi-border bg-amplifi-surface px-3 py-2.5 text-left ${hasBtc && hasStarknet ? "" : "w-1/2"}`}
+                  >
+                    <img src={ASSET_ICONS.STRK} alt="Starknet" className="h-5 w-5 shrink-0" />
+                    <span className="truncate text-xs font-medium text-amplifi-text">
+                      {short(starknetAddress)}
+                    </span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

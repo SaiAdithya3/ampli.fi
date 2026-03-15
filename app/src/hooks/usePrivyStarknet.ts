@@ -6,7 +6,7 @@ import { StarkSDK, OnboardStrategy } from "starkzap";
 import type { WalletInterface } from "starkzap";
 import { StarknetSigner } from "@atomiqlabs/chain-starknet";
 import type { Account } from "starknet";
-import { API_URL, NETWORK, STORAGE_KEYS } from "@/lib/constants";
+import { API_URL, IS_MAINNET, STORAGE_KEYS } from "@/lib/constants";
 
 export interface UsePrivyStarknetResult {
   wallet: WalletInterface | null;
@@ -52,6 +52,17 @@ export function usePrivyStarknet(): UsePrivyStarknetResult {
     }
   }, [logout]);
 
+  // Clear wallet state when user becomes unauthenticated (logout, session expiry, etc.)
+  useEffect(() => {
+    if (!authenticated) {
+      setWallet(null);
+      setWalletAddress(null);
+      setStarknetSigner(null);
+      setupAttemptedRef.current = false;
+      setError(null);
+    }
+  }, [authenticated]);
+
   useEffect(() => {
     if (!ready || !authenticated || !user?.id) return;
     if (wallet) return;
@@ -72,6 +83,7 @@ export function usePrivyStarknet(): UsePrivyStarknetResult {
 
         let wId = window.localStorage.getItem(STORAGE_KEYS.walletId);
         let wPk = window.localStorage.getItem(STORAGE_KEYS.publicKey);
+        const hadStoredWallet = !!(wId && wPk);
 
         if (!wId || !wPk) {
           const token = await getAccessToken();
@@ -94,14 +106,17 @@ export function usePrivyStarknet(): UsePrivyStarknetResult {
         if (!wId || !wPk) throw new Error("Failed to get wallet credentials");
 
         const sdk = new StarkSDK({
-          network: NETWORK === "mainnet" ? "mainnet" : "sepolia",
+          network: IS_MAINNET ? "mainnet" : "sepolia",
           paymaster: { nodeUrl: `${API_URL}/api/paymaster` },
         });
 
-        const onboardOptions = {
+        // Use "never" when reusing stored wallet (already deployed); "if_needed" for first-time
+        const deployMode = hadStoredWallet ? "never" : "if_needed";
+
+        const { wallet: sdkWallet } = await sdk.onboard({
           strategy: OnboardStrategy.Privy,
-          deploy: "if_needed" as const,
-          feeMode: "sponsored" as const,
+          deploy: deployMode,
+          feeMode: "sponsored",
           privy: {
             resolve: async () => ({
               walletId: wId!,
@@ -109,29 +124,7 @@ export function usePrivyStarknet(): UsePrivyStarknetResult {
               serverUrl: `${API_URL}/api/wallet/sign`,
             }),
           },
-        };
-
-        let sdkWallet: Awaited<ReturnType<typeof sdk.onboard>>["wallet"];
-        try {
-          const result = await sdk.onboard(onboardOptions);
-          sdkWallet = result.wallet;
-        } catch (err) {
-          // Contract may already be deployed (RPC lag / race with another session).
-          // Retry with deploy: "never" - the wallet will work since the contract exists.
-          const errStr =
-            (err instanceof Error ? err.message : String(err)) +
-            (typeof err === "object" && err !== null ? JSON.stringify(err) : "");
-          const isAlreadyDeployed = errStr.toLowerCase().includes("already deployed");
-          if (isAlreadyDeployed) {
-            const retry = await sdk.onboard({
-              ...onboardOptions,
-              deploy: "never",
-            });
-            sdkWallet = retry.wallet;
-          } else {
-            throw err;
-          }
-        }
+        });
 
         const addr = sdkWallet.address;
         setWallet(sdkWallet);
@@ -140,8 +133,8 @@ export function usePrivyStarknet(): UsePrivyStarknetResult {
 
         if (typeof sdkWallet.getAccount === "function") {
           try {
-            const account = sdkWallet.getAccount();
-            const signer = new StarknetSigner(account as unknown as Account);
+            const account = sdkWallet.getAccount() as unknown as Account;
+            const signer = new StarknetSigner(account);
             setStarknetSigner(signer);
           } catch (e) {
             console.warn("[PrivyStarknet] Could not create StarknetSigner:", e);

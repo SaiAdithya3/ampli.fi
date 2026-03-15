@@ -6,19 +6,18 @@ import {
   useDisconnect,
   useSwitchChain,
 } from "@starknet-react/core";
+import { constants } from "starknet";
 import { connectors } from "@/layout/starknet/config";
-import { NETWORK } from "@/lib/constants";
+import { IS_MAINNET } from "@/lib/constants";
 
-/** Starknet wallet connect via @starknet-react/core connectors (no modal). */
+const targetChainId = IS_MAINNET
+  ? constants.StarknetChainId.SN_MAIN
+  : constants.StarknetChainId.SN_SEPOLIA;
+
 export function useStarknetWallet() {
   const { connect, connectAsync } = useConnect();
   const { disconnectAsync } = useDisconnect();
   const { address, status, account, connector, chainId } = useAccount();
-
-  const targetChainId =
-    NETWORK === "mainnet"
-      ? "0x534e5f4d41494e" // SN_MAIN
-      : "0x534e5f5345504f4c4941"; // SN_SEPOLIA
 
   const { switchChainAsync } = useSwitchChain({
     params: { chainId: targetChainId },
@@ -35,6 +34,6 @@ export function useStarknetWallet() {
     starknetAccount: account,
     starknetChainId: chainId,
     starknetSwitchChain: switchChainAsync,
-    targetChainId: BigInt(targetChainId),
+    targetChainId,
   };
 }

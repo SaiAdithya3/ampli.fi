@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { BitcoinNetwork } from "@atomiqlabs/sdk";
 import { RPC_URL, IS_MAINNET } from "@/lib/constants";
 import {
@@ -84,11 +85,27 @@ export function useAtomiqSwap(): UseAtomiqSwapResult {
   }, []);
 
   const clearLogs = useCallback(() => setLogs([]), []);
+  const location = useLocation();
 
-  // Initialize swapper on mount
+  // Lazy init: only when on a route that needs swap (avoids RPC polling on /borrow home)
+  const needsSwapper =
+    location.pathname.startsWith("/borrow/offer") ||
+    location.pathname.startsWith("/borrow/initiate") ||
+    location.pathname.startsWith("/borrow/order") ||
+    location.pathname === "/swap" ||
+    location.pathname === "/earn";
+
   useEffect(() => {
     mountedRef.current = true;
     let cancelled = false;
+
+    if (!needsSwapper) {
+      return () => {
+        cancelled = true;
+        mountedRef.current = false;
+        void stopSwapper();
+      };
+    }
 
     (async () => {
       setIsInitializing(true);
@@ -112,7 +129,7 @@ export function useAtomiqSwap(): UseAtomiqSwapResult {
       mountedRef.current = false;
       void stopSwapper();
     };
-  }, [log]);
+  }, [log, needsSwapper]);
 
   const runSwap = useCallback(
     async (params: {

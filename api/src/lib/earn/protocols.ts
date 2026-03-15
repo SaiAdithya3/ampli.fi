@@ -7,6 +7,7 @@ export type EarnProtocolAdapter = {
   getPools?(validator?: string): Promise<EarnPool[]>;
   getPositions(userAddress: string): Promise<EarnPosition[]>;
   getHistory?(userAddress: string, opts?: { type?: string }): Promise<EarnHistoryEntry[]>;
+  enrichPoolCommissions?(pools: EarnPool[]): Promise<void>;
 };
 
 export function getEnabledEarnProtocols(): string[] {
